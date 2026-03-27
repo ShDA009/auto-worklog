@@ -1,0 +1,47 @@
+# Бинарники
+/bin/
+/obj/
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Go сборки
+*.test
+*.out
+
+# Пакеты зависимостей, если не пушите их
+/vendor/
+
+# IDE / редакторы
+.vscode/
+.idea/
+*.iml
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.swp
+*~
+.project
+.DS_Store
+
+# macOS
+.DS_Store
+
+# Кеши и артефакты
+*.cache
+*.tmp
+*.log
+coverage.out
+
+# Node/npm (если есть фронт)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+package-lock.json
+yarn.lock
+
+# Конфигурационные файлы, содержащие секреты
+.env
