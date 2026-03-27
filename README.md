@@ -24,6 +24,35 @@
 go install ./cmd/worklog
 ```
 
+## Сборка для всех ОС
+
+Включаю `CGO_ENABLED=0` для статической сборки и стабильности при кросс-компиляции.
+
+Для Linux:
+
+```sh
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o bin/worklog-linux-amd64 ./cmd/worklog
+```
+
+Для macOS:
+
+```sh
+CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -o bin/worklog-darwin-amd64 ./cmd/worklog
+```
+
+Для Windows:
+
+```sh
+CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -o bin/worklog-windows-amd64.exe ./cmd/worklog
+```
+
+Дополнительно можно собирать под arm64:
+
+```sh
+CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o bin/worklog-linux-arm64 ./cmd/worklog
+CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -o bin/worklog-darwin-arm64 ./cmd/worklog
+```
+
 ## Конфигурация
 
 Настройки передаются через переменные окружения или `.env` файл.
