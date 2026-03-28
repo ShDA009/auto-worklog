@@ -5,8 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
+	"os"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -93,7 +96,7 @@ func (c Client) FetchActivityIntervals(
 	if err != nil {
 		return nil, err
 	}
-	issues, err := c.fetchIssuesWithChangelog(ctx, dayStart, dayEnd, rules)
+	issues, err := c.fetchIssuesWithChangelog(ctx, dayStart)
 	if err != nil {
 		return nil, err
 	}
@@ -129,24 +132,18 @@ func (c Client) fetchMyself(ctx context.Context) (userInfo, error) {
 	return me, nil
 }
 
-func (c Client) fetchIssuesWithChangelog(ctx context.Context, dayStart, dayEnd time.Time, rules StatusRules) ([]jiraIssue, error) {
+func (c Client) fetchIssuesWithChangelog(ctx context.Context, dayStart time.Time) ([]jiraIssue, error) {
 	base := strings.TrimRight(c.BaseURL, "/") + "/rest/api/2/search"
 
-	ignoredStr := joinJQLStrings(rules.IgnoredStatuses)
-	closedStr := joinJQLStrings(rules.DayCloseStatuses)
+	jqlTemplate := os.Getenv("JIRA_JQL_TEMPLATE")
+	if strings.TrimSpace(jqlTemplate) == "" {
+		return nil, errors.New("JIRA_JQL_TEMPLATE is not set")
+	}
 
-	// JQL based on user request: 
-	// - Project ODP
-	// - Status not in ignored (Новый)
-	// - Type not Epic
-	// - Assignee is current AND status not in closed
-	// - OR Assignee WAS current AND updated >= dayStart (using timestamp for accuracy)
-	jql := fmt.Sprintf(
-		`project = ODP AND status NOT IN (%s) AND issuetype NOT IN (Epic) AND ((assignee = currentUser() AND status NOT IN (%s)) OR (assignee WAS currentUser() AND updated >= "%s"))`,
-		ignoredStr,
-		closedStr,
-		dayStart.Format("2006-01-02 15:04"),
-	)
+	// Expand environment variables in template (e.g., ${JIRA_IGNORED_STATUSES})
+	jqlTemplate = expandEnvVars(jqlTemplate)
+
+	jql := fmt.Sprintf(jqlTemplate, dayStart.Format("2006-01-02 15:04"))
 
 	startAt := 0
 	const pageSize = 100
@@ -174,8 +171,9 @@ func (c Client) fetchIssuesWithChangelog(ctx context.Context, dayStart, dayEnd t
 
 		var result searchResponse
 		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			body, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
 			resp.Body.Close()
-			return nil, fmt.Errorf("jira search status: %s", resp.Status)
+			return nil, fmt.Errorf("jira search status: %s\nbody: %s", resp.Status, string(body))
 		}
 		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 			resp.Body.Close()
@@ -357,15 +355,13 @@ func containsNormalized(items []string, value string) bool {
 	return false
 }
 
-func joinJQLStrings(items []string) string {
-	if len(items) == 0 {
-		return "''"
-	}
-	quoted := make([]string, len(items))
-	for i, item := range items {
-		quoted[i] = fmt.Sprintf(`"%s"`, strings.ReplaceAll(item, `"`, `\"`))
-	}
-	return strings.Join(quoted, ", ")
+func expandEnvVars(template string) string {
+	// Replace ${VAR_NAME} with os.Getenv("VAR_NAME")
+	re := regexp.MustCompile(`\$\{([A-Z_]+)\}`)
+	return re.ReplaceAllStringFunc(template, func(match string) string {
+		varName := match[2 : len(match)-1] // Extract VAR_NAME from ${VAR_NAME}
+		return os.Getenv(varName)
+	})
 }
 
 func DefaultStatusRules() StatusRules {
