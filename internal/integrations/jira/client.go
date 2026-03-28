@@ -96,7 +96,7 @@ func (c Client) FetchActivityIntervals(
 	if err != nil {
 		return nil, err
 	}
-	issues, err := c.fetchIssuesWithChangelog(ctx, dayStart)
+	issues, err := c.fetchIssuesWithChangelog(ctx, dayStart, dayStart)
 	if err != nil {
 		return nil, err
 	}
@@ -105,6 +105,51 @@ func (c Client) FetchActivityIntervals(
 	for _, issue := range issues {
 		intervals = append(intervals, buildIssueIntervals(issue, me, dayStart, dayEnd, rules)...)
 	}
+	return intervals, nil
+}
+
+func (c Client) FetchActivityIntervalsForRange(
+	ctx context.Context,
+	fromDate time.Time,
+	toDate time.Time,
+	timezone string,
+	rules StatusRules,
+) ([]domain.IssueActivityInterval, error) {
+	if c.BaseURL == "" || c.Email == "" || c.APIToken == "" {
+		return nil, errors.New("JIRA_BASE_URL/JIRA_EMAIL/JIRA_API_TOKEN are not set")
+	}
+
+	loc, err := time.LoadLocation(timezone)
+	if err != nil {
+		return nil, fmt.Errorf("load timezone %q: %w", timezone, err)
+	}
+
+	me, err := c.fetchMyself(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	// Fetch issues for entire date range in one query
+	issues, err := c.fetchIssuesWithChangelog(ctx, fromDate, toDate)
+	if err != nil {
+		return nil, err
+	}
+
+	intervals := make([]domain.IssueActivityInterval, 0)
+	
+	// Process each date in range to extract intervals
+	rangeStart := time.Date(fromDate.Year(), fromDate.Month(), fromDate.Day(), 0, 0, 0, 0, loc)
+	rangeEnd := toDate.Add(24 * time.Hour)
+	
+	for d := rangeStart; d.Before(rangeEnd); d = d.AddDate(0, 0, 1) {
+		dayStart := d
+		dayEnd := d.Add(24 * time.Hour)
+		
+		for _, issue := range issues {
+			intervals = append(intervals, buildIssueIntervals(issue, me, dayStart, dayEnd, rules)...)
+		}
+	}
+	
 	return intervals, nil
 }
 
@@ -132,7 +177,7 @@ func (c Client) fetchMyself(ctx context.Context) (userInfo, error) {
 	return me, nil
 }
 
-func (c Client) fetchIssuesWithChangelog(ctx context.Context, dayStart time.Time) ([]jiraIssue, error) {
+func (c Client) fetchIssuesWithChangelog(ctx context.Context, fromDate, toDate time.Time) ([]jiraIssue, error) {
 	base := strings.TrimRight(c.BaseURL, "/") + "/rest/api/2/search"
 
 	jqlTemplate := os.Getenv("JIRA_JQL_TEMPLATE")
@@ -143,7 +188,12 @@ func (c Client) fetchIssuesWithChangelog(ctx context.Context, dayStart time.Time
 	// Expand environment variables in template (e.g., ${JIRA_IGNORED_STATUSES})
 	jqlTemplate = expandEnvVars(jqlTemplate)
 
-	jql := fmt.Sprintf(jqlTemplate, dayStart.Format("2006-01-02 15:04"))
+	// Build date string for JQL - use from date as lower bound only
+	// (upper bound excluded to capture tasks updated after range end)
+	fromTimeStr := fromDate.Format("2006-01-02") + " 00:00"
+	
+	// Format JQL with only lower date bound
+	jql := fmt.Sprintf(jqlTemplate, fromTimeStr)
 
 	startAt := 0
 	const pageSize = 100
@@ -173,6 +223,7 @@ func (c Client) fetchIssuesWithChangelog(ctx context.Context, dayStart time.Time
 		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 			body, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
 			resp.Body.Close()
+			fmt.Print(jql+"\n")
 			return nil, fmt.Errorf("jira search status: %s\nbody: %s", resp.Status, string(body))
 		}
 		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {

@@ -42,7 +42,7 @@ func TestBuildMeetingWorklogs(t *testing.T) {
 		{Title: "Invalid duration ODP-3333", DurationMinutes: -5},
 	}
 
-	got := BuildMeetingWorklogs(meetings, "ODP-2933")
+	got := BuildMeetingWorklogs(meetings, "ODP-2933", []string{"занят", "обед"})
 
 	if got.TotalMinutes != 162 {
 		t.Fatalf("TotalMinutes = %d, want 162", got.TotalMinutes)
@@ -97,7 +97,7 @@ func TestBuildMeetingWorklogsFallbackComment(t *testing.T) {
 		{Title: "Обсуждение без ключа", DurationMinutes: 30},
 	}
 
-	got := BuildMeetingWorklogs(meetings, "ODP-2933")
+	got := BuildMeetingWorklogs(meetings, "ODP-2933", []string{"занят", "обед"})
 	if len(got.Items) != 1 {
 		t.Fatalf("len(Items) = %d, want 1", len(got.Items))
 	}
@@ -152,7 +152,7 @@ func TestIsIgnoredMeetingTitle(t *testing.T) {
 		tt := tt
 		t.Run(tt.title, func(t *testing.T) {
 			t.Parallel()
-			got := isIgnoredMeetingTitle(tt.title)
+			got := isIgnoredMeetingTitle(tt.title, []string{"занят", "обед"})
 			if got != tt.expected {
 				t.Fatalf("isIgnoredMeetingTitle(%q) = %v, want %v", tt.title, got, tt.expected)
 			}

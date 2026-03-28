@@ -88,7 +88,10 @@ func TestBuildIssueIntervalsMatchesAssigneeByKey(t *testing.T) {
 }
 
 func TestFetchMyselfAndSearch(t *testing.T) {
-	t.Parallel()
+	// Cannot use t.Parallel() with t.Setenv()
+	
+	// Set required environment variable for the test
+	t.Setenv("JIRA_JQL_TEMPLATE", `assignee = currentUser() AND status NOT IN ("New") AND (updated >= "%s")`)
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {

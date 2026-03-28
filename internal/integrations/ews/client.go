@@ -117,6 +117,12 @@ func (c Client) FetchMeetings(ctx context.Context, date time.Time, timezone stri
 			continue
 		}
 
+		// Meeting must start within the requested day: [start, end)
+		// This excludes all-day events from previous days that end exactly at midnight
+		if startAt.Before(start) || !startAt.Before(end) {
+			continue
+		}
+
 		duration := int(endAt.Sub(startAt).Minutes())
 		if duration <= 0 {
 			continue
@@ -143,7 +149,7 @@ func buildFindItemPayload(start, end time.Time) string {
 	out.WriteString(`<m:CalendarView StartDate="`)
 	out.WriteString(start.Format(time.RFC3339))
 	out.WriteString(`" EndDate="`)
-	out.WriteString(end.Format(time.RFC3339))
+	out.WriteString(end.Add(-1 * time.Nanosecond).Format(time.RFC3339))
 	out.WriteString(`"/>`)
 	out.WriteString(`<m:ParentFolderIds><t:DistinguishedFolderId Id="calendar"/></m:ParentFolderIds>`)
 	out.WriteString(`</m:FindItem></soap:Body></soap:Envelope>`)
