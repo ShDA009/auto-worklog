@@ -15,6 +15,8 @@ type IssueActivityInterval struct {
 	IssueKey      string
 	Summary       string
 	Status        string
+	StatusTo      string   // non-empty if this interval ended with a status transition
+	StatusChain   []string // full ordered status chain for the day (set on first interval only)
 	Start         time.Time
 	End           time.Time
 	TransferredTo string
@@ -137,39 +139,63 @@ func buildIssueWeights(intervals []IssueActivityInterval) map[string]float64 {
 }
 
 func buildIssueComments(intervals []IssueActivityInterval) map[string]string {
+	type issueData struct {
+		intervals []IssueActivityInterval
+	}
+	byIssue := make(map[string]*issueData)
+	for _, iv := range intervals {
+		if iv.IssueKey == "" {
+			continue
+		}
+		if byIssue[iv.IssueKey] == nil {
+			byIssue[iv.IssueKey] = &issueData{}
+		}
+		byIssue[iv.IssueKey].intervals = append(byIssue[iv.IssueKey].intervals, iv)
+	}
+
 	comments := make(map[string]string)
-	transfers := make(map[string]string)
-	
-	for _, interval := range intervals {
-		if interval.IssueKey == "" {
-			continue
-		}
-		
-		// Запоминаем информацию о передаче задачи
-		if interval.TransferredTo != "" && transfers[interval.IssueKey] == "" {
-			transfers[interval.IssueKey] = interval.TransferredTo
-		}
-		
-		// Формируем комментарий только один раз для каждого issue
-		if _, exists := comments[interval.IssueKey]; exists {
-			continue
-		}
-		
-		summary := strings.TrimSpace(interval.Summary)
+	for issueKey, data := range byIssue {
+		sort.Slice(data.intervals, func(i, j int) bool {
+			return data.intervals[i].Start.Before(data.intervals[j].Start)
+		})
+
+		summary := strings.TrimSpace(data.intervals[0].Summary)
 		if summary == "" {
 			summary = "Auto allocation from Jira activity"
 		}
-		summary = `"` + summary + `"`
-		if strings.EqualFold(strings.TrimSpace(interval.Status), "Подтверждение") {
-			summary = "Проверка " + summary
+
+		// Use full status chain from first interval (covers all transitions including through inactive statuses)
+		var statusChain []string
+		var transferTo string
+		for _, iv := range data.intervals {
+			if len(iv.StatusChain) > 0 {
+				statusChain = iv.StatusChain
+			}
+			if iv.TransferredTo != "" && transferTo == "" {
+				transferTo = iv.TransferredTo
+			}
 		}
-		
-		// Добавляем информацию о передаче задачи, если она была передана
-		if transfers[interval.IssueKey] != "" {
-			summary = summary + " (передана " + transfers[interval.IssueKey] + ")"
+		// Fallback: build chain from Status fields when StatusChain is not set (e.g. in tests or direct construction)
+		if len(statusChain) == 0 {
+			for _, iv := range data.intervals {
+				if len(statusChain) == 0 || statusChain[len(statusChain)-1] != iv.Status {
+					statusChain = append(statusChain, iv.Status)
+				}
+			}
 		}
-		
-		comments[interval.IssueKey] = summary
+
+		comment := `"` + summary + `"`
+		if len(statusChain) > 1 {
+			comment += " (" + strings.Join(statusChain, " → ") + ")"
+		} else if len(statusChain) == 1 && strings.EqualFold(strings.TrimSpace(statusChain[0]), "Подтверждение") {
+			comment = "Проверка " + comment
+		}
+
+		if transferTo != "" {
+			comment += " (передана " + transferTo + ")"
+		}
+
+		comments[issueKey] = comment
 	}
 	return comments
 }

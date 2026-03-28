@@ -360,7 +360,7 @@ func loadJiraAllocation(date time.Time, timezone string, remaining int, defaultI
 		// Filter intervals for this specific date
 		var filtered []domain.IssueActivityInterval
 		for _, interval := range cachedIntervals {
-			if !interval.Start.After(dayEnd) && interval.End.After(dayStart) {
+			if interval.Start.Before(dayEnd) && interval.End.After(dayStart) {
 				filtered = append(filtered, interval)
 			}
 		}
@@ -434,6 +434,7 @@ func splitCSV(value string) []string {
 	out := make([]string, 0, len(parts))
 	for _, part := range parts {
 		part = strings.TrimSpace(part)
+		part = strings.Trim(part, `"'`)
 		if part != "" {
 			out = append(out, part)
 		}

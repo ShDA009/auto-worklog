@@ -32,6 +32,7 @@ func TestFetchMeetings(t *testing.T) {
                 <t:Subject>Daily ODP-1001</t:Subject>
                 <t:Start>2026-03-27T10:00:00Z</t:Start>
                 <t:End>2026-03-27T10:30:00Z</t:End>
+                <t:LegacyFreeBusyStatus>Busy</t:LegacyFreeBusyStatus>
               </t:CalendarItem>
             </t:Items>
           </m:RootFolder>
@@ -84,13 +85,16 @@ func TestFetchMeetingsExcludesAllDayEventFromPreviousDay(t *testing.T) {
             <t:Items>
               <t:CalendarItem>
                 <t:Subject>All-day Monday event</t:Subject>
-                <t:Start>2026-03-23T00:00:00Z</t:Start>
-                <t:End>2026-03-24T00:00:00Z</t:End>
+                <t:Start>2026-03-22T21:00:00Z</t:Start>
+                <t:End>2026-03-23T21:00:00Z</t:End>
+                <t:IsAllDayEvent>true</t:IsAllDayEvent>
+                <t:LegacyFreeBusyStatus>Busy</t:LegacyFreeBusyStatus>
               </t:CalendarItem>
               <t:CalendarItem>
                 <t:Subject>Tuesday morning meeting ODP-123</t:Subject>
                 <t:Start>2026-03-24T09:00:00Z</t:Start>
                 <t:End>2026-03-24T10:00:00Z</t:End>
+                <t:LegacyFreeBusyStatus>Busy</t:LegacyFreeBusyStatus>
               </t:CalendarItem>
             </t:Items>
           </m:RootFolder>

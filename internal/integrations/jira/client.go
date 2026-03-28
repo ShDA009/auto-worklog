@@ -48,6 +48,7 @@ type jiraIssue struct {
 	Key    string `json:"key"`
 	Fields struct {
 		Summary string `json:"summary"`
+		Created string `json:"created"`
 		Status  struct {
 			Name string `json:"name"`
 		} `json:"status"`
@@ -204,7 +205,7 @@ func (c Client) fetchIssuesWithChangelog(ctx context.Context, fromDate, toDate t
 		q.Set("jql", jql)
 		q.Set("startAt", fmt.Sprintf("%d", startAt))
 		q.Set("maxResults", fmt.Sprintf("%d", pageSize))
-		q.Set("fields", "summary,status,assignee")
+		q.Set("fields", "summary,status,assignee,created")
 		q.Set("expand", "changelog")
 
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+"?"+q.Encode(), nil)
@@ -256,6 +257,17 @@ func buildIssueIntervals(
 	dayEnd time.Time,
 	rules StatusRules,
 ) []domain.IssueActivityInterval {
+	// Parse issue creation time to avoid showing it on days before it existed
+	var issueCreatedAt time.Time
+	if issue.Fields.Created != "" {
+		if t, err := parseJiraTime(issue.Fields.Created); err == nil {
+			issueCreatedAt = t
+			if !issueCreatedAt.Before(dayEnd) {
+				return nil // issue didn't exist yet on this day
+			}
+		}
+	}
+
 	events := make([]timedChange, 0, len(issue.Changelog.Histories))
 	for _, h := range issue.Changelog.Histories {
 		tm, err := parseJiraTime(h.Created)
@@ -294,9 +306,23 @@ func buildIssueIntervals(
 		}
 	}
 
-	statusEnteredToday := false
-	active := isStatusActive(state.status, statusEnteredToday, rules) && isSelfAssignee(state.assignee, me)
+	// Collect full status chain for the day: starting status + all transitions within [dayStart, dayEnd]
+	statusChain := []string{state.status}
+	for _, event := range events {
+		if event.At.Before(dayStart) || event.At.After(dayEnd) {
+			continue
+		}
+		if event.Change.statusTo != "" && statusChain[len(statusChain)-1] != event.Change.statusTo {
+			statusChain = append(statusChain, event.Change.statusTo)
+		}
+	}
+
+	active := isSelfAssignee(state.assignee, me) && !isIgnoredStatus(state.status, rules)
 	cursor := dayStart
+	// Don't count time before the issue was created
+	if !issueCreatedAt.IsZero() && issueCreatedAt.After(cursor) {
+		cursor = issueCreatedAt
+	}
 	intervals := make([]domain.IssueActivityInterval, 0)
 
 	for _, event := range events {
@@ -315,23 +341,23 @@ func buildIssueIntervals(
 				IssueKey:      issue.Key,
 				Summary:       issue.Fields.Summary,
 				Status:        state.status,
+				StatusTo:      event.Change.statusTo,
 				Start:         cursor,
 				End:           event.At,
-				TransferredTo:  transferredTo,
+				TransferredTo: transferredTo,
 			})
 		}
 		if event.Change.statusTo != "" {
 			state.status = event.Change.statusTo
-			statusEnteredToday = isDayCloseStatus(state.status, rules)
 		}
 		if event.Change.assigneeTo != "" {
 			state.assignee = event.Change.assigneeTo
 		}
 		cursor = event.At
-		active = isStatusActive(state.status, statusEnteredToday, rules) && isSelfAssignee(state.assignee, me)
+		active = isSelfAssignee(state.assignee, me) && !isIgnoredStatus(state.status, rules)
 	}
 
-	if active && dayEnd.After(cursor) {
+	if active && dayEnd.After(cursor) && (cursor.After(dayStart) || !isDayCloseStatus(state.status, rules)) {
 		intervals = append(intervals, domain.IssueActivityInterval{
 			IssueKey: issue.Key,
 			Summary:  issue.Fields.Summary,
@@ -340,6 +366,12 @@ func buildIssueIntervals(
 			End:      dayEnd,
 		})
 	}
+
+	// Attach full status chain to first interval
+	if len(intervals) > 0 && len(statusChain) > 0 {
+		intervals[0].StatusChain = statusChain
+	}
+
 	return intervals
 }
 

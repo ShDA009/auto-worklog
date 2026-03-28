@@ -42,9 +42,11 @@ type findItemEnvelope struct {
 }
 
 type calendarItem struct {
-	Subject string `xml:"Subject"`
-	Start   string `xml:"Start"`
-	End     string `xml:"End"`
+	Subject              string `xml:"Subject"`
+	Start                string `xml:"Start"`
+	End                  string `xml:"End"`
+	IsAllDayEvent        bool   `xml:"IsAllDayEvent"`
+	LegacyFreeBusyStatus string `xml:"LegacyFreeBusyStatus"`
 }
 
 func (c Client) FetchMeetings(ctx context.Context, date time.Time, timezone string) ([]domain.MeetingEvent, error) {
@@ -108,6 +110,10 @@ func (c Client) FetchMeetings(ctx context.Context, date time.Time, timezone stri
 
 	meetings := make([]domain.MeetingEvent, 0, len(msg.RootFolder.Items.CalendarItems))
 	for _, item := range msg.RootFolder.Items.CalendarItems {
+		// Only count Busy and Tentative; skip Free, OOF marked as free, etc.
+		if item.LegacyFreeBusyStatus != "Busy" && item.LegacyFreeBusyStatus != "Tentative" && item.LegacyFreeBusyStatus != "OOF" {
+			continue
+		}
 		startAt, err := time.Parse(time.RFC3339, item.Start)
 		if err != nil {
 			continue
@@ -117,16 +123,46 @@ func (c Client) FetchMeetings(ctx context.Context, date time.Time, timezone stri
 			continue
 		}
 
-		// Meeting must start within the requested day: [start, end)
-		// This excludes all-day events from previous days that end exactly at midnight
-		if startAt.Before(start) || !startAt.Before(end) {
+		if item.IsAllDayEvent {
+			// For all-day events check if the event range intersects the requested day.
+			// EWS returns End as midnight of the day after the last day (exclusive).
+			startAtLocal := startAt.In(location)
+			endAtLocal := endAt.In(location)
+
+			if !endAtLocal.After(start) || !startAtLocal.Before(end) {
+				continue
+			}
+
+			meetings = append(meetings, domain.MeetingEvent{
+				Title:           item.Subject,
+				DurationMinutes: 480, // 8 hours per day for all-day events
+			})
 			continue
 		}
 
-		duration := int(endAt.Sub(startAt).Minutes())
-		if duration <= 0 {
+		// For regular (non-all-day) events, cap duration to requested day
+		startAtLocal := startAt.In(location)
+		endAtLocal := endAt.In(location)
+
+		// Meeting must intersect with requested day: [start, end)
+		if endAtLocal.Before(start) || startAtLocal.After(end) {
 			continue
 		}
+
+		// Cap event to day boundaries
+		eventStart := startAtLocal
+		if eventStart.Before(start) {
+			eventStart = start
+		}
+		eventEnd := endAtLocal
+		if eventEnd.After(end) {
+			eventEnd = end
+		}
+		durationSeconds := eventEnd.Sub(eventStart).Seconds()
+		if durationSeconds <= 0 {
+			continue
+		}
+		duration := min(int(durationSeconds/60), 480) // Cap at 8h for multi-day events
 
 		meetings = append(meetings, domain.MeetingEvent{
 			Title:           item.Subject,
@@ -145,7 +181,9 @@ func buildFindItemPayload(start, end time.Time) string {
 	out.WriteString(` xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">`)
 	out.WriteString(`<soap:Header><t:RequestServerVersion Version="Exchange2016" /></soap:Header>`)
 	out.WriteString(`<soap:Body><m:FindItem Traversal="Shallow">`)
-	out.WriteString(`<m:ItemShape><t:BaseShape>Default</t:BaseShape></m:ItemShape>`)
+	out.WriteString(`<m:ItemShape><t:BaseShape>Default</t:BaseShape>` +
+		`<t:AdditionalProperties><t:FieldURI FieldURI="calendar:LegacyFreeBusyStatus"/></t:AdditionalProperties>` +
+		`</m:ItemShape>`)
 	out.WriteString(`<m:CalendarView StartDate="`)
 	out.WriteString(start.Format(time.RFC3339))
 	out.WriteString(`" EndDate="`)
