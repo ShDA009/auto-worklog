@@ -1,179 +1,96 @@
 # auto-worklog
 
-Утилита для автоматического формирования и применения ежедневного учёта рабочего времени (worklog) на основе данных из EWS-календаря и активности в Jira.
+Автоматическое формирование ежедневного учёта рабочего времени на основе EWS-календаря и Jira активности.
 
 ## Возможности
 
-- `plan`: построение плана рабочей нагрузки по встречам и активности
-- `apply`: подтвреждение и отправка worklog в Jira
-- **поддержка диапазонов дат** (например `2026-03-24:2026-03-28`) с автоматическим исключением выходных
-- буферизация времени встреч (`+20%`)
-- привязка встреч к issue при наличии ключа вида `ODP-123` в теме
-- fallback issue из `DEFAULT_ISSUE` для неизвестных встреч
-- распределение оставшегося времени по активным Jira issue пропорционально активности
-- игнорирование встреч с темами `занят` и `обед`
-- оптимизированные Jira запросы (весь диапазон дат в **одном API запросе**)
+- **plan** — построение плана рабочей нагрузки
+- **apply** — отправка worklog в Jira
+- Поддержка диапазонов дат с исключением выходных
+- Автопривязка встреч к issue по ключу в теме (ODP-123)
+- Распределение оставшегося времени по Jira issue
+- Оптимизация: весь диапазон в **одном API запросе**
 
-## Требования
+## Быстрый старт
 
-- Go 1.20+
-- Доступ к EWS (Exchange Web Services)
-- Jira Cloud / Jira Server REST API
-
-## Установка
-
-```sh
-go install ./cmd/worklog
+Обязательные переменные в `.env`:
+```
+DEFAULT_ISSUE=ODP-1000
+EWS_URL=https://...
+EWS_USERNAME=user@mail.com
+EWS_PASSWORD=***
+JIRA_BASE_URL=https://your-domain.atlassian.net
+JIRA_EMAIL=user@mail.com
+JIRA_API_TOKEN=***
 ```
 
-## Сборка для всех ОС
-
-Включаю `CGO_ENABLED=0` для статической сборки и стабильности при кросс-компиляции.
-
-Для Linux:
-
+Примеры:
 ```sh
-CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o bin/worklog-linux-amd64 ./cmd/worklog
-```
+# План на сегодня
+./worklog plan
 
-Для macOS:
+# План на дату
+./worklog plan -d 2026-03-27
 
-```sh
-CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -o bin/worklog-darwin-amd64 ./cmd/worklog
-```
+# План на диапазон (выходные исключены автоматически)
+./worklog plan -d 2026-03-24:2026-03-28
 
-Для Windows:
+# Применить worklogs в Jira
+./worklog apply -d 2026-03-27
 
-```sh
-CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -o bin/worklog-windows-amd64.exe ./cmd/worklog
-```
-
-Дополнительно можно собирать под arm64:
-
-```sh
-CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o bin/worklog-linux-arm64 ./cmd/worklog
-CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -o bin/worklog-darwin-arm64 ./cmd/worklog
+# Кастомные часы в день (по умолчанию 8)
+./worklog plan -d 2026-03-27 -h 6
 ```
 
 ## Конфигурация
 
-Настройки передаются через переменные окружения или `.env` файл.
+**Обязательные:**
+| Переменная | Описание |
+|---|---|
+| DEFAULT_ISSUE | Default issue для неизвестных встреч (ODP-1000) |
+| EWS_URL | URL Exchange Web Services |
+| EWS_USERNAME | Почта или логин |
+| EWS_PASSWORD | Пароль |
+| JIRA_BASE_URL | URL Jira (https://domain.atlassian.net) |
+| JIRA_EMAIL | Email для API доступ |
+| JIRA_API_TOKEN | API token |
 
-Обязательные переменные:
+**Опциональные:**
+| Переменная | Пример | Описание |
+|---|---|---|
+| EWS_IGNORED_MEETINGS | занят,обед | Встречи для игнорирования |
+| JIRA_IGNORED_STATUSES | Новый | Статусы не для учёта |
+| JIRA_DAY_CLOSE_STATUSES | Закрыт,Closed,Отменен,Отменён,"Включен в релиз" | Статусы "день закрыт" |
+| JIRA_JQL_TEMPLATE | project = ODP AND status NOT IN ({JIRA_IGNORED_STATUSES}) AND issuetype NOT IN (Epic) AND ((assignee = currentUser() AND status NOT IN (\${JIRA_DAY_CLOSE_STATUSES})) OR (assignee WAS currentUser() AND updated >= "%s"))| Custom JQL (поддержка ${VAR} и %s) |
+| IS_MANAGER | false | Распределять неиспользованное время |
+| MANAGER_ACTIVITY_COMMENT | Координация и синхронизация задач | Comment для менеджерского времени |
 
-- `DEFAULT_ISSUE` (например `ODP-1000`)
-- `EWS_USERNAME`
-- `EWS_PASSWORD`
+## Флаги команды
 
-Jira:
+```
+-d DATE       Дата (YYYY-MM-DD) или диапазон (YYYY-MM-DD:YYYY-MM-DD)
+-h HOURS      Рабочих часов в день (по умолчанию 8)
+--with-jira   Включить Jira активность (по умолчанию true)
+```
 
-- `JIRA_BASE_URL` (https://your-domain.atlassian.net)
-- `JIRA_EMAIL`
-- `JIRA_API_TOKEN`
-
-Дополнительно (по умолчанию пустые):
-
-- `EWS_URL` (если не задан - ошибка`)
-- `EWS_IGNORED_MEETINGS` — список тем встреч для игнорирования (по умолчанию: `занят,обед`)
-- `JIRA_IGNORED_STATUSES` — статусы, которые не учитывать
-- `JIRA_DAY_CLOSE_STATUSES` — статусы, после которых день считается «закрытым»
-- `JIRA_JQL_TEMPLATE` — JQL-запрос для поиска задач.
-  - Поддерживает подстановку переменных: `${JIRA_IGNORED_STATUSES}`, `${JIRA_DAY_CLOSE_STATUSES}`
-  - Плейсхолдер `%s` для даты (одна подстановка, используется как нижняя граница: `updated >= "%s"`)
-
-### Управление нераспределённым временем
-
-- `IS_MANAGER` — флаг для менеджеров (`true` или `false`, по умолчанию: `false`)
-  - Если `true`: нераспределённое время записывается в DEFAULT_ISSUE с комментарием из `MANAGER_ACTIVITY_COMMENT`
-  - Если `false`: нераспределённое время помечается как не распределённое (требует ручного заполнения)
-- `MANAGER_ACTIVITY_COMMENT` — комментарий для распределённого менеджером времени (например: `Координация и синхронизация задач`)
-## Использование
-
-### План на одну дату
+## Сборка
 
 ```sh
-worklog plan -d 2026-03-27
+# macOS arm64
+CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -o bin/worklog ./cmd/worklog
+
+# Linux amd64
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o bin/worklog ./cmd/worklog
+
+# Windows amd64
+CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -o bin/worklog.exe ./cmd/worklog
 ```
 
-Вывод:
+## Требования
 
-- таблица issue / минуты / источник / комментарий
-- итоговое количество минут
-
-### План на диапазон дат (исключая выходные)
-
-```sh
-worklog plan -d 2026-03-24:2026-03-28
-```
-
-Вывод для каждого рабочего дня:
-
-- заголовок `=== 2026-03-24 (Monday) ===`
-- таблица issue / минуты / источник / комментарий
-- пустая строка между днями
-
-**Оптимизация:** весь диапазон загружается с Jira **в одном запросе**, затем фильтруется по дням.
-
-### Применение (отправка в Jira)
-
-```sh
-worklog apply -d 2026-03-27
-```
-
-После запроса `Apply these worklogs? type 'yes' to continue:` введите `yes`.
-
-### Применение диапазона дат
-
-```sh
-worklog apply -d 2026-03-24:2026-03-28
-```
-
-- Показывает план для всех рабочих дней в диапазоне
-- Один запрос подтверждения для всего периода
-- Применяет worklog для каждого дня, показывает итоговую статистику
-
-```
-=== 2026-03-24 (Monday) ===
-[plan table]
-
-=== 2026-03-25 (Tuesday) ===
-[plan table]
-
-...
-
-Apply these worklogs? type 'yes' to continue: yes
-
-2026-03-24: created=3 skipped=0
-2026-03-25: created=2 skipped=1
-2026-03-26: created=4 skipped=0
-2026-03-27: created=3 skipped=0
-2026-03-28: created=2 skipped=1
-
-Total: created=14 skipped=2
-```
-
-### Настройка рабочих часов в день
-
-По умолчанию списывается **8 часов** в день. Можно изменить через флаг `-h`:
-
-```sh
-worklog plan -d 2026-03-27 -h 6
-```
-
-Это распределит только 6 часов (вместо 8) между встречами и Jira активностью.
-
-Примеры:
-
-```sh
-# Короткий день (6 часов)
-worklog plan -h 6
-
-# Длинный день (10 часов)
-worklog plan -h 10
-
-# Диапазон дат с кастомным количеством часов
-worklog apply -d 2026-03-24:2026-03-28 -h 7
-```
+- Go 1.20+
+- EWS доступ (Exchange)
+- Jira API доступ
 
 ## Тестирование
 
@@ -181,31 +98,10 @@ worklog apply -d 2026-03-24:2026-03-28 -h 7
 go test ./...
 ```
 
-## Структура проекта
+## Архитектура
 
-- `cmd/worklog` — точка входа CLI
-- `internal/app` — парсинг/рендеринг плана
-- `internal/domain` — бизнес-логика (встречи, активность)
-- `internal/integrations/ews` — загрузка встреч из Exchange
-- `internal/integrations/jira` — загрузка активности + отправка worklog
-
-## Соображения
-
-- Временная зона по умолчанию: `Europe/Moscow`.
-- Встречи из EWS считаются 24 часа с 00:00 до 23:59, с учётом буфера +20%.
-- Если `--with-jira` выключен, учёт только по встречам.
-- **Рабочие часы в день:** по умолчанию 8 часов, настраивается флагом `--hours` (например `--hours 6` для 6-часового дня).
-
-### Диапазоны дат
-
-- Формат: `YYYY-MM-DD:YYYY-MM-DD` (например `2026-03-24:2026-03-28`)
-- Автоматически исключаются выходные дни (суббота и воскресенье)
-- Одиночная дата: `YYYY-MM-DD` (процесс без изменений, отправляет один день)
-- Дата по умолчанию: если флаг `-d` не указан, используется текущий день
-
-### Оптимизация Jira
-
-- При диапазоне в 5 рабочих дней: **1 API запрос в Jira** вместо 5
-- JQL использует нижнюю границу: `updated >= "2026-03-24 00:00"`
-- Верхняя граница не используется (захватывает задачи, обновлённые позже конца периода)
-- Граница дней рассчитывается в памяти на основе changelog для каждого дня
+- `cmd/worklog` — CLI точка входа
+- `internal/app` — парсинг и рендеринг
+- `internal/domain` — бизнес-логика
+- `internal/integrations/ews` — Exchange интеграция
+- `internal/integrations/jira` — Jira интеграция
