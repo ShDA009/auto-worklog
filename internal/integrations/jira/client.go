@@ -220,8 +220,8 @@ func buildIssueIntervals(
 				changes.statusFrom = item.FromString
 				changes.statusTo = item.ToString
 			case "assignee":
-				changes.assigneeFrom = firstNonEmpty(item.From, item.FromString)
-				changes.assigneeTo = firstNonEmpty(item.To, item.ToString)
+				changes.assigneeFrom = firstNonEmpty(item.FromString, item.From)
+				changes.assigneeTo = firstNonEmpty(item.ToString, item.To)
 			}
 		}
 		events = append(events, timedChange{At: tm, Change: changes})
@@ -258,12 +258,17 @@ func buildIssueIntervals(
 			break
 		}
 		if active && event.At.After(cursor) {
+			transferredTo := ""
+			if event.Change.assigneeTo != "" && !isSelfAssignee(event.Change.assigneeTo, me) {
+				transferredTo = event.Change.assigneeTo
+			}
 			intervals = append(intervals, domain.IssueActivityInterval{
-				IssueKey: issue.Key,
-				Summary:  issue.Fields.Summary,
-				Status:   state.status,
-				Start:    cursor,
-				End:      event.At,
+				IssueKey:      issue.Key,
+				Summary:       issue.Fields.Summary,
+				Status:        state.status,
+				Start:         cursor,
+				End:           event.At,
+				TransferredTo:  transferredTo,
 			})
 		}
 		if event.Change.statusTo != "" {

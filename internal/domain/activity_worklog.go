@@ -12,11 +12,12 @@ const (
 )
 
 type IssueActivityInterval struct {
-	IssueKey string
-	Summary  string
-	Status   string
-	Start    time.Time
-	End      time.Time
+	IssueKey      string
+	Summary       string
+	Status        string
+	Start         time.Time
+	End           time.Time
+	TransferredTo string
 }
 
 func BuildActivityWorklogs(intervals []IssueActivityInterval, remainingMinutes int) DailyAllocation {
@@ -137,10 +138,23 @@ func buildIssueWeights(intervals []IssueActivityInterval) map[string]float64 {
 
 func buildIssueComments(intervals []IssueActivityInterval) map[string]string {
 	comments := make(map[string]string)
+	transfers := make(map[string]string)
+	
 	for _, interval := range intervals {
 		if interval.IssueKey == "" {
 			continue
 		}
+		
+		// Запоминаем информацию о передаче задачи
+		if interval.TransferredTo != "" && transfers[interval.IssueKey] == "" {
+			transfers[interval.IssueKey] = interval.TransferredTo
+		}
+		
+		// Формируем комментарий только один раз для каждого issue
+		if _, exists := comments[interval.IssueKey]; exists {
+			continue
+		}
+		
 		summary := strings.TrimSpace(interval.Summary)
 		if summary == "" {
 			summary = "Auto allocation from Jira activity"
@@ -149,9 +163,13 @@ func buildIssueComments(intervals []IssueActivityInterval) map[string]string {
 		if strings.EqualFold(strings.TrimSpace(interval.Status), "Подтверждение") {
 			summary = "Проверка " + summary
 		}
-		if _, exists := comments[interval.IssueKey]; !exists {
-			comments[interval.IssueKey] = summary
+		
+		// Добавляем информацию о передаче задачи, если она была передана
+		if transfers[interval.IssueKey] != "" {
+			summary = summary + " (передана " + transfers[interval.IssueKey] + ")"
 		}
+		
+		comments[interval.IssueKey] = summary
 	}
 	return comments
 }
