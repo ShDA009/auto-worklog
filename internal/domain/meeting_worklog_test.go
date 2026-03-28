@@ -159,3 +159,38 @@ func TestIsIgnoredMeetingTitle(t *testing.T) {
 		})
 	}
 }
+
+func TestBuildMeetingWorklogs_AllDayEvent(t *testing.T) {
+	t.Parallel()
+
+	meetings := []MeetingEvent{
+		{Title: "Плановый отпуск ODP-2933", DurationMinutes: 480, IsAllDayEvent: true},
+		{Title: "Full day meeting ODP-1111", DurationMinutes: 480, IsAllDayEvent: false},
+		{Title: "Daily ODP-1111", DurationMinutes: 60, IsAllDayEvent: false},
+	}
+
+	got := BuildMeetingWorklogs(meetings, "ODP-2933", []string{})
+
+	// All-day event should NOT have coefficient applied (480 minutes stay 480)
+	// Full 8-hour meeting should also NOT have coefficient (480 minutes stay 480)
+	// Regular event should have coefficient (60 * 1.2 = 72)
+	if got.TotalMinutes != 1032 {
+		t.Fatalf("TotalMinutes = %d, want 1032 (480 + 480 + 72)", got.TotalMinutes)
+	}
+
+	if len(got.Items) != 3 {
+		t.Fatalf("len(Items) = %d, want 3", len(got.Items))
+	}
+
+	if got.Items[0].Minutes != 480 {
+		t.Fatalf("all-day event minutes = %d, want 480 (no coefficient)", got.Items[0].Minutes)
+	}
+
+	if got.Items[1].Minutes != 480 {
+		t.Fatalf("full-day meeting minutes = %d, want 480 (no coefficient)", got.Items[1].Minutes)
+	}
+
+	if got.Items[2].Minutes != 72 {
+		t.Fatalf("regular event minutes = %d, want 72 (with 1.2 coefficient)", got.Items[2].Minutes)
+	}
+}

@@ -12,6 +12,7 @@ import (
 type meetingInput struct {
 	Title           string `json:"title"`
 	DurationMinutes int    `json:"duration_minutes"`
+	IsAllDayEvent   bool   `json:"is_all_day_event"`
 }
 
 func LoadMeetingsFromJSON(r io.Reader) ([]domain.MeetingEvent, error) {
@@ -25,6 +26,7 @@ func LoadMeetingsFromJSON(r io.Reader) ([]domain.MeetingEvent, error) {
 		meetings = append(meetings, domain.MeetingEvent{
 			Title:           m.Title,
 			DurationMinutes: m.DurationMinutes,
+			IsAllDayEvent:   m.IsAllDayEvent,
 		})
 	}
 

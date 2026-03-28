@@ -16,6 +16,7 @@ var urlRegexp = regexp.MustCompile(`https?://\S+`)
 type MeetingEvent struct {
 	Title           string
 	DurationMinutes int
+	IsAllDayEvent   bool
 }
 
 type WorklogEntry struct {
@@ -53,7 +54,11 @@ func BuildMeetingWorklogs(meetings []MeetingEvent, defaultIssue string, ignoredT
 			continue
 		}
 
-		bufferedMinutes := ApplyMeetingBufferMinutes(meeting.DurationMinutes)
+		bufferedMinutes := meeting.DurationMinutes
+		// Don't apply coefficient to all-day events or full 8-hour meetings
+		if !meeting.IsAllDayEvent && meeting.DurationMinutes != 480 {
+			bufferedMinutes = ApplyMeetingBufferMinutes(meeting.DurationMinutes)
+		}
 		if bufferedMinutes <= 0 {
 			continue
 		}

@@ -136,6 +136,7 @@ func (c Client) FetchMeetings(ctx context.Context, date time.Time, timezone stri
 			meetings = append(meetings, domain.MeetingEvent{
 				Title:           item.Subject,
 				DurationMinutes: 480, // 8 hours per day for all-day events
+				IsAllDayEvent:   true,
 			})
 			continue
 		}
