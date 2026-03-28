@@ -130,7 +130,8 @@ func buildPlanAllocation(opts planOptions) (domain.DailyAllocation, time.Time, e
 	if err != nil {
 		return domain.DailyAllocation{}, time.Time{}, err
 	}
-	allocation := domain.BuildMeetingWorklogs(meetings, defaultIssueKey)
+	ignoredMeetings := splitCSV(os.Getenv("EWS_IGNORED_MEETINGS"))
+	allocation := domain.BuildMeetingWorklogs(meetings, defaultIssueKey, ignoredMeetings)
 
 	if opts.withJira {
 		remaining := max(0, 8*60-allocation.TotalMinutes)
@@ -202,13 +203,6 @@ func loadJiraAllocation(date time.Time, timezone string, remaining int, defaultI
 		activity.TotalMinutes = remaining
 	}
 	return activity, nil
-}
-
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
 }
 
 func loadJiraStatusRulesFromEnv() jira.StatusRules {

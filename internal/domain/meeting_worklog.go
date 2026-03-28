@@ -42,13 +42,13 @@ func ApplyMeetingBufferMinutes(durationMinutes int) int {
 	return int(math.Ceil(float64(durationMinutes) * 1.2))
 }
 
-func BuildMeetingWorklogs(meetings []MeetingEvent, defaultIssue string) DailyAllocation {
+func BuildMeetingWorklogs(meetings []MeetingEvent, defaultIssue string, ignoredTitles []string) DailyAllocation {
 	allocation := DailyAllocation{
 		Items: make([]WorklogEntry, 0, len(meetings)),
 	}
 
 	for _, meeting := range meetings {
-		if isIgnoredMeetingTitle(meeting.Title) {
+		if isIgnoredMeetingTitle(meeting.Title, ignoredTitles) {
 			continue
 		}
 
@@ -78,9 +78,18 @@ func BuildMeetingWorklogs(meetings []MeetingEvent, defaultIssue string) DailyAll
 	return allocation
 }
 
-func isIgnoredMeetingTitle(title string) bool {
+func isIgnoredMeetingTitle(title string, ignoredTitles []string) bool {
 	normalized := strings.ToLower(strings.TrimSpace(title))
-	return normalized == "занят" || normalized == "обед"
+	if len(ignoredTitles) == 0 {
+		return normalized == "занят" || normalized == "обед"
+	}
+
+	for _, ignored := range ignoredTitles {
+		if normalized == strings.ToLower(strings.TrimSpace(ignored)) {
+			return true
+		}
+	}
+	return false
 }
 
 func sanitizeMeetingComment(title string) string {

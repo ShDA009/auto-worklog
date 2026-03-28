@@ -93,7 +93,7 @@ func (c Client) FetchActivityIntervals(
 	if err != nil {
 		return nil, err
 	}
-	issues, err := c.fetchIssuesWithChangelog(ctx, dayStart, dayEnd)
+	issues, err := c.fetchIssuesWithChangelog(ctx, dayStart, dayEnd, rules)
 	if err != nil {
 		return nil, err
 	}
@@ -129,12 +129,25 @@ func (c Client) fetchMyself(ctx context.Context) (userInfo, error) {
 	return me, nil
 }
 
-func (c Client) fetchIssuesWithChangelog(ctx context.Context, dayStart, dayEnd time.Time) ([]jiraIssue, error) {
+func (c Client) fetchIssuesWithChangelog(ctx context.Context, dayStart, dayEnd time.Time, rules StatusRules) ([]jiraIssue, error) {
 	base := strings.TrimRight(c.BaseURL, "/") + "/rest/api/2/search"
-	jql := fmt.Sprintf(`updated >= "%s" AND updated <= "%s" AND (assignee = currentUser() OR assignee WAS currentUser())`,
+
+	ignoredStr := joinJQLStrings(rules.IgnoredStatuses)
+	closedStr := joinJQLStrings(rules.DayCloseStatuses)
+
+	// JQL based on user request: 
+	// - Project ODP
+	// - Status not in ignored (Новый)
+	// - Type not Epic
+	// - Assignee is current AND status not in closed
+	// - OR Assignee WAS current AND updated >= dayStart (using timestamp for accuracy)
+	jql := fmt.Sprintf(
+		`project = ODP AND status NOT IN (%s) AND issuetype NOT IN (Epic) AND ((assignee = currentUser() AND status NOT IN (%s)) OR (assignee WAS currentUser() AND updated >= "%s"))`,
+		ignoredStr,
+		closedStr,
 		dayStart.Format("2006-01-02 15:04"),
-		dayEnd.Add(-time.Minute).Format("2006-01-02 15:04"),
 	)
+
 	startAt := 0
 	const pageSize = 100
 	all := make([]jiraIssue, 0, pageSize)
@@ -337,6 +350,17 @@ func containsNormalized(items []string, value string) bool {
 		}
 	}
 	return false
+}
+
+func joinJQLStrings(items []string) string {
+	if len(items) == 0 {
+		return "''"
+	}
+	quoted := make([]string, len(items))
+	for i, item := range items {
+		quoted[i] = fmt.Sprintf(`"%s"`, strings.ReplaceAll(item, `"`, `\"`))
+	}
+	return strings.Join(quoted, ", ")
 }
 
 func DefaultStatusRules() StatusRules {
