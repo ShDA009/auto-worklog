@@ -50,14 +50,16 @@ func run(args []string) error {
 type planOptions struct {
 	dateStr  string
 	withJira bool
+	hours    int
 }
 
 func parsePlanOptions(args []string) (planOptions, error) {
 	fs := flag.NewFlagSet("plan", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 
-	dateStr := fs.String("date", "", "date in YYYY-MM-DD or range YYYY-MM-DD:YYYY-MM-DD (default: today)")
+	dateStr := fs.String("d", "", "date in YYYY-MM-DD or range YYYY-MM-DD:YYYY-MM-DD (default: today)")
 	withJira := fs.Bool("with-jira", true, "include jira activity allocation")
+	hours := fs.Int("h", 8, "working hours per day (default: 8)")
 
 	if err := fs.Parse(args); err != nil {
 		return planOptions{}, err
@@ -66,6 +68,7 @@ func parsePlanOptions(args []string) (planOptions, error) {
 	return planOptions{
 		dateStr:  *dateStr,
 		withJira: *withJira,
+		hours:    *hours,
 	}, nil
 }
 
@@ -272,7 +275,7 @@ func buildPlanAllocation(opts planOptions) (domain.DailyAllocation, time.Time, e
 	allocation := domain.BuildMeetingWorklogs(meetings, defaultIssueKey, ignoredMeetings)
 
 	if opts.withJira {
-		remaining := max(0, 8*60-allocation.TotalMinutes)
+		remaining := max(0, opts.hours*60-allocation.TotalMinutes)
 		activity, err := loadJiraAllocation(date, defaultTimezone, remaining, defaultIssueKey, nil)
 		if err != nil {
 			return domain.DailyAllocation{}, time.Time{}, err
@@ -297,7 +300,7 @@ func buildPlanAllocationForDate(date time.Time, opts planOptions, cachedInterval
 	allocation := domain.BuildMeetingWorklogs(meetings, defaultIssueKey, ignoredMeetings)
 
 	if opts.withJira {
-		remaining := max(0, 8*60-allocation.TotalMinutes)
+		remaining := max(0, opts.hours*60-allocation.TotalMinutes)
 		activity, err := loadJiraAllocation(date, defaultTimezone, remaining, defaultIssueKey, cachedIntervals)
 		if err != nil {
 			return domain.DailyAllocation{}, time.Time{}, err
@@ -323,7 +326,7 @@ func loadMeetings(date time.Time, timezone string) ([]domain.MeetingEvent, error
 }
 
 func usageError() error {
-	return errors.New("usage: worklog plan|apply [--date YYYY-MM-DD|YYYY-MM-DD:YYYY-MM-DD] [--with-jira]")
+	return errors.New("usage: worklog plan|apply [-d YYYY-MM-DD|YYYY-MM-DD:YYYY-MM-DD] [--with-jira] [-h N]")
 }
 
 func loadDotEnv(path string) error {
