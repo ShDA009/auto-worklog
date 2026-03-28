@@ -24,6 +24,7 @@ type WorklogEntry struct {
 	Minutes  int
 	Source   string
 	Comment  string
+	WorkType string
 }
 
 type DailyAllocation struct {

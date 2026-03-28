@@ -5,7 +5,7 @@
 ## Возможности
 
 - **plan** — построение плана рабочей нагрузки
-- **apply** — отправка worklog в Jira
+- **apply** — отправка worklog в Jira через Tempo Timesheets API
 - Поддержка диапазонов дат с исключением выходных
 - Автопривязка встреч к issue по ключу в теме (ODP-123)
 - Распределение оставшегося времени по Jira issue
@@ -51,9 +51,9 @@ JIRA_API_TOKEN=***
 | EWS_URL | URL Exchange Web Services |
 | EWS_USERNAME | Почта или логин |
 | EWS_PASSWORD | Пароль |
-| JIRA_BASE_URL | URL Jira (https://domain.atlassian.net) |
-| JIRA_EMAIL | Email для API доступ |
-| JIRA_API_TOKEN | API token |
+| JIRA_BASE_URL | URL Jira (http://jira.example.com) |
+| JIRA_EMAIL | Email для API доступа |
+| JIRA_API_TOKEN | Пароль или API token |
 
 **Опциональные:**
 | Переменная | Пример | Описание |
@@ -62,6 +62,7 @@ JIRA_API_TOKEN=***
 | JIRA_IGNORED_STATUSES | Новый | Статусы не для учёта |
 | JIRA_DAY_CLOSE_STATUSES | Закрыт,Closed,Отменен,Отменён,"Включен в релиз" | Статусы "день закрыт" |
 | JIRA_JQL_TEMPLATE | project = ODP AND status NOT IN ({JIRA_IGNORED_STATUSES}) AND issuetype NOT IN (Epic) AND ((assignee = currentUser() AND status NOT IN (\${JIRA_DAY_CLOSE_STATUSES})) OR (assignee WAS currentUser() AND updated >= "%s"))| Custom JQL (поддержка ${VAR} и %s) |
+| WORK_TYPE | Руководство | Вид работ (атрибут Tempo: Руководство, Разработка, Аналитика, Тестирование) |
 | IS_MANAGER | false | Распределять неиспользованное время |
 | MANAGER_ACTIVITY_COMMENT | Координация и синхронизация задач | Comment для менеджерского времени |
 
@@ -91,6 +92,7 @@ CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -o bin/worklog.exe ./cmd/worklo
 - Go 1.20+
 - EWS доступ (Exchange)
 - Jira API доступ
+- Tempo Timesheets (плагин Jira)
 
 ## Тестирование
 

@@ -234,12 +234,18 @@ func runApply(args []string, in io.Reader, out io.Writer) error {
 
 	totalCreated := 0
 	totalSkipped := 0
+	defaultWorkType := strings.TrimSpace(os.Getenv("WORK_TYPE"))
 
 	// Apply worklogs for each date
 	for _, date := range dates {
 		allocation, _, err := buildPlanAllocationForDate(date, opts, cachedIntervals)
 		if err != nil {
 			return err
+		}
+
+		// Set work type on all entries
+		for i := range allocation.Items {
+			allocation.Items[i].WorkType = defaultWorkType
 		}
 
 		result, err := jiraClient.ApplyWorklogs(context.Background(), date, defaultTimezone, allocation.Items)
@@ -345,6 +351,7 @@ func loadJiraAllocation(date time.Time, timezone string, remaining int, defaultI
 	}
 
 	isManager := strings.EqualFold(strings.TrimSpace(os.Getenv("IS_MANAGER")), "true")
+	workType := strings.TrimSpace(os.Getenv("WORK_TYPE"))
 	managerComment := strings.TrimSpace(os.Getenv("MANAGER_ACTIVITY_COMMENT"))
 
 	// If pre-cached intervals provided, filter for this date only
@@ -368,12 +375,13 @@ func loadJiraAllocation(date time.Time, timezone string, remaining int, defaultI
 		activity := domain.BuildActivityWorklogs(filtered, remaining)
 		if len(activity.Items) == 0 && remaining > 0 {
 			if isManager {
-				// Manager: allocate unspent time to DEFAULT_ISSUE with manager comment
+				// Manager: allocate unspent time to DEFAULT_ISSUE with manager comment and work type
 				activity.Items = append(activity.Items, domain.WorklogEntry{
 					IssueKey: defaultIssueKey,
 					Minutes:  remaining,
 					Source:   domain.SourceActivity,
 					Comment:  managerComment,
+					WorkType: workType,
 				})
 				activity.TotalMinutes = remaining
 			} else {
@@ -402,12 +410,13 @@ func loadJiraAllocation(date time.Time, timezone string, remaining int, defaultI
 	activity := domain.BuildActivityWorklogs(intervals, remaining)
 	if len(activity.Items) == 0 && remaining > 0 {
 		if isManager {
-			// Manager: allocate unspent time to DEFAULT_ISSUE with manager comment
+			// Manager: allocate unspent time to DEFAULT_ISSUE with manager comment and work type
 			activity.Items = append(activity.Items, domain.WorklogEntry{
 				IssueKey: defaultIssueKey,
 				Minutes:  remaining,
 				Source:   domain.SourceActivity,
 				Comment:  managerComment,
+				WorkType: workType,
 			})
 			activity.TotalMinutes = remaining
 		} else {

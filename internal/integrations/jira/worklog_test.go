@@ -14,16 +14,19 @@ import (
 func TestApplyWorklogsUsesPerIssueCache(t *testing.T) {
 	t.Parallel()
 
-	var myselfCalls, listCalls, createCalls int
+	var myselfCalls, listCalls, createCalls, issueCalls int
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.URL.Path == "/rest/api/2/myself":
 			myselfCalls++
-			_, _ = w.Write([]byte(`{"name":"user@example.com","emailAddress":"user@example.com"}`))
-		case r.Method == http.MethodGet && r.URL.Path == "/rest/api/2/issue/ODP-1/worklog":
+			_, _ = w.Write([]byte(`{"key":"JIRAUSER1","name":"user@example.com","emailAddress":"user@example.com"}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/rest/tempo-timesheets/4/worklogs/search":
 			listCalls++
-			_, _ = w.Write([]byte(`{"worklogs":[]}`))
-		case r.Method == http.MethodPost && r.URL.Path == "/rest/api/2/issue/ODP-1/worklog":
+			_, _ = w.Write([]byte(`[]`))
+		case r.Method == http.MethodGet && r.URL.Path == "/rest/api/2/issue/ODP-1":
+			issueCalls++
+			_, _ = w.Write([]byte(`{"id":"12345","key":"ODP-1"}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/rest/tempo-timesheets/4/worklogs/":
 			createCalls++
 			w.WriteHeader(http.StatusCreated)
 			_, _ = w.Write([]byte(`{}`))
@@ -58,6 +61,9 @@ func TestApplyWorklogsUsesPerIssueCache(t *testing.T) {
 	}
 	if listCalls != 1 {
 		t.Fatalf("listCalls = %d, want 1", listCalls)
+	}
+	if issueCalls != 1 {
+		t.Fatalf("issueCalls = %d, want 1 (should be cached)", issueCalls)
 	}
 	if createCalls != 2 {
 		t.Fatalf("createCalls = %d, want 2", createCalls)
