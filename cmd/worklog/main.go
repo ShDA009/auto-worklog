@@ -341,6 +341,9 @@ func loadJiraAllocation(date time.Time, timezone string, remaining int, defaultI
 		return domain.DailyAllocation{}, nil
 	}
 
+	isManager := strings.EqualFold(strings.TrimSpace(os.Getenv("IS_MANAGER")), "true")
+	managerComment := strings.TrimSpace(os.Getenv("MANAGER_ACTIVITY_COMMENT"))
+
 	// If pre-cached intervals provided, filter for this date only
 	if len(cachedIntervals) > 0 {
 		loc, err := time.LoadLocation(timezone)
@@ -361,13 +364,19 @@ func loadJiraAllocation(date time.Time, timezone string, remaining int, defaultI
 		
 		activity := domain.BuildActivityWorklogs(filtered, remaining)
 		if len(activity.Items) == 0 && remaining > 0 {
-			activity.Items = append(activity.Items, domain.WorklogEntry{
-				IssueKey: defaultIssueKey,
-				Minutes:  remaining,
-				Source:   domain.SourceActivity,
-				Comment:  "Fallback: no active Jira issues",
-			})
-			activity.TotalMinutes = remaining
+			if isManager {
+				// Manager: allocate unspent time to DEFAULT_ISSUE with manager comment
+				activity.Items = append(activity.Items, domain.WorklogEntry{
+					IssueKey: defaultIssueKey,
+					Minutes:  remaining,
+					Source:   domain.SourceActivity,
+					Comment:  managerComment,
+				})
+				activity.TotalMinutes = remaining
+			} else {
+				// Non-manager: mark time as unallocated, do not add to worklog
+				activity.Unallocated = remaining
+			}
 		}
 		return activity, nil
 	}
@@ -389,13 +398,19 @@ func loadJiraAllocation(date time.Time, timezone string, remaining int, defaultI
 
 	activity := domain.BuildActivityWorklogs(intervals, remaining)
 	if len(activity.Items) == 0 && remaining > 0 {
-		activity.Items = append(activity.Items, domain.WorklogEntry{
-			IssueKey: defaultIssueKey,
-			Minutes:  remaining,
-			Source:   domain.SourceActivity,
-			Comment:  "Fallback: no active Jira issues",
-		})
-		activity.TotalMinutes = remaining
+		if isManager {
+			// Manager: allocate unspent time to DEFAULT_ISSUE with manager comment
+			activity.Items = append(activity.Items, domain.WorklogEntry{
+				IssueKey: defaultIssueKey,
+				Minutes:  remaining,
+				Source:   domain.SourceActivity,
+				Comment:  managerComment,
+			})
+			activity.TotalMinutes = remaining
+		} else {
+			// Non-manager: mark time as unallocated, do not add to worklog
+			activity.Unallocated = remaining
+		}
 	}
 	return activity, nil
 }

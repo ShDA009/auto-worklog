@@ -38,5 +38,12 @@ func RenderMeetingPlan(w io.Writer, allocation domain.DailyAllocation) {
 		fmt.Fprintf(tw, "%s\t%d\t%s\t%s\n", item.IssueKey, item.Minutes, item.Source, item.Comment)
 	}
 	_ = tw.Flush()
-	fmt.Fprintf(w, "\nTotal: %d min\n", allocation.TotalMinutes)
+	
+	hours := float64(allocation.TotalMinutes) / 60.0
+	fmt.Fprintf(w, "\nTotal: %.1f hours\n", hours)
+	
+	if allocation.Unallocated > 0 {
+		unallocatedHours := float64(allocation.Unallocated) / 60.0
+		fmt.Fprintf(w, "⚠ Unallocated: %.1f hours - requires manual distribution\n", unallocatedHours)
+	}
 }

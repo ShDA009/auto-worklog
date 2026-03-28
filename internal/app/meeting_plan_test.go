@@ -60,7 +60,7 @@ func TestRenderMeetingPlan(t *testing.T) {
 		"ODP-2933",
 		"Daily ODP-1001",
 		"Team sync",
-		"Total: 90 min",
+		"Total: 1.5 hours",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("output missing %q. output:\n%s", want, out)

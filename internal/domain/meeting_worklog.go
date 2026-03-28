@@ -28,6 +28,7 @@ type WorklogEntry struct {
 type DailyAllocation struct {
 	Items        []WorklogEntry
 	TotalMinutes int
+	Unallocated  int // Remaining time for non-managers (not added to DEFAULT_ISSUE)
 }
 
 func ExtractIssueKey(title string) string {
