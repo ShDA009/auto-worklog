@@ -10,6 +10,7 @@ import (
 	"os"
 	"strings"
 	"time"
+	_ "time/tzdata" // Embed timezone database for Windows
 
 	"auto-worklog/internal/app"
 	"auto-worklog/internal/domain"
