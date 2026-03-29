@@ -407,16 +407,6 @@ func parseJiraTime(v string) (time.Time, error) {
 	return time.Time{}, fmt.Errorf("unsupported jira time format: %s", v)
 }
 
-func isStatusActive(status string, statusEnteredToday bool, rules StatusRules) bool {
-	if isIgnoredStatus(status, rules) {
-		return false
-	}
-	if isDayCloseStatus(status, rules) {
-		return statusEnteredToday
-	}
-	return true
-}
-
 func isIgnoredStatus(status string, rules StatusRules) bool {
 	return containsNormalized(rules.IgnoredStatuses, status)
 }

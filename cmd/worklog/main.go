@@ -262,35 +262,6 @@ func runApply(args []string, in io.Reader, out io.Writer) error {
 	return nil
 }
 
-func buildPlanAllocation(opts planOptions) (domain.DailyAllocation, time.Time, error) {
-	defaultIssueKey, err := defaultIssueFromEnv()
-	if err != nil {
-		return domain.DailyAllocation{}, time.Time{}, err
-	}
-
-	date, err := resolveDate(opts.dateStr, defaultTimezone)
-	if err != nil {
-		return domain.DailyAllocation{}, time.Time{}, err
-	}
-
-	meetings, err := loadMeetings(date, defaultTimezone)
-	if err != nil {
-		return domain.DailyAllocation{}, time.Time{}, err
-	}
-	ignoredMeetings := splitCSV(os.Getenv("EWS_IGNORED_MEETINGS"))
-	allocation := domain.BuildMeetingWorklogs(meetings, defaultIssueKey, ignoredMeetings)
-
-	if opts.withJira {
-		remaining := max(0, opts.hours*60-allocation.TotalMinutes)
-		activity, err := loadJiraAllocation(date, defaultTimezone, remaining, defaultIssueKey, nil)
-		if err != nil {
-			return domain.DailyAllocation{}, time.Time{}, err
-		}
-		allocation.Items = append(allocation.Items, activity.Items...)
-		allocation.TotalMinutes += activity.TotalMinutes
-	}
-	return allocation, date, nil
-}
 
 func buildPlanAllocationForDate(date time.Time, opts planOptions, cachedIntervals []domain.IssueActivityInterval) (domain.DailyAllocation, time.Time, error) {
 	defaultIssueKey, err := defaultIssueFromEnv()
