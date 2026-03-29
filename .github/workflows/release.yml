@@ -60,6 +60,12 @@ jobs:
         with:
           merge-multiple: true
 
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: RELEASE_NOTES.md
+          sparse-checkout-cone-mode: false
+
       - uses: softprops/action-gh-release@v2
         with:
           files: worklog-*
+          body_path: RELEASE_NOTES.md
