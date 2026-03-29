@@ -56,6 +56,97 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Generate release notes
+        id: notes
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          PREV_TAG=$(git tag --sort=-v:refname | grep -v "^${TAG}$" | head -1)
+
+          if [ -z "$PREV_TAG" ]; then
+            PREV_REF=$(git rev-list --max-parents=0 HEAD)
+            RANGE_LABEL="начального коммита"
+          else
+            PREV_REF="$PREV_TAG"
+            RANGE_LABEL="$PREV_TAG"
+          fi
+
+          # Собираем статистику изменений
+          STATS=$(git diff --stat "$PREV_REF".."$TAG" | tail -1)
+          FILES_CHANGED=$(git diff --name-only "$PREV_REF".."$TAG")
+
+          # Категоризируем изменения по директориям
+          CMD_CHANGES=$(echo "$FILES_CHANGED" | grep "^cmd/" || true)
+          DOMAIN_CHANGES=$(echo "$FILES_CHANGED" | grep "^internal/domain/" || true)
+          APP_CHANGES=$(echo "$FILES_CHANGED" | grep "^internal/app/" || true)
+          JIRA_CHANGES=$(echo "$FILES_CHANGED" | grep "^internal/integrations/jira/" || true)
+          EWS_CHANGES=$(echo "$FILES_CHANGED" | grep "^internal/integrations/ews/" || true)
+          TEST_CHANGES=$(echo "$FILES_CHANGED" | grep "_test\.go$" || true)
+          CI_CHANGES=$(echo "$FILES_CHANGED" | grep "^\.github/" || true)
+          CONFIG_CHANGES=$(echo "$FILES_CHANGED" | grep -E "^(\.env|\.gitignore|go\.mod|go\.sum|README)" || true)
+
+          # Генерируем release notes
+          {
+            echo "body<<RELEASE_EOF"
+            echo "## Что изменилось (с ${RANGE_LABEL})"
+            echo ""
+
+            if [ -n "$CMD_CHANGES" ]; then
+              echo "### CLI"
+              echo "$CMD_CHANGES" | while read -r f; do echo "- \`$f\`"; done
+              echo ""
+            fi
+
+            if [ -n "$DOMAIN_CHANGES" ]; then
+              echo "### Бизнес-логика"
+              echo "$DOMAIN_CHANGES" | while read -r f; do echo "- \`$f\`"; done
+              echo ""
+            fi
+
+            if [ -n "$APP_CHANGES" ]; then
+              echo "### Приложение"
+              echo "$APP_CHANGES" | while read -r f; do echo "- \`$f\`"; done
+              echo ""
+            fi
+
+            if [ -n "$JIRA_CHANGES" ]; then
+              echo "### Jira интеграция"
+              echo "$JIRA_CHANGES" | while read -r f; do echo "- \`$f\`"; done
+              echo ""
+            fi
+
+            if [ -n "$EWS_CHANGES" ]; then
+              echo "### EWS интеграция"
+              echo "$EWS_CHANGES" | while read -r f; do echo "- \`$f\`"; done
+              echo ""
+            fi
+
+            if [ -n "$TEST_CHANGES" ]; then
+              echo "### Тесты"
+              echo "$TEST_CHANGES" | while read -r f; do echo "- \`$f\`"; done
+              echo ""
+            fi
+
+            if [ -n "$CI_CHANGES" ]; then
+              echo "### CI/CD"
+              echo "$CI_CHANGES" | while read -r f; do echo "- \`$f\`"; done
+              echo ""
+            fi
+
+            if [ -n "$CONFIG_CHANGES" ]; then
+              echo "### Конфигурация"
+              echo "$CONFIG_CHANGES" | while read -r f; do echo "- \`$f\`"; done
+              echo ""
+            fi
+
+            echo "---"
+            echo "📊 **Статистика:** ${STATS}"
+            echo "RELEASE_EOF"
+          } >> "$GITHUB_OUTPUT"
+
       - uses: actions/download-artifact@v4
         with:
           merge-multiple: true
@@ -63,3 +154,4 @@ jobs:
       - uses: softprops/action-gh-release@v2
         with:
           files: worklog-*
+          body: ${{ steps.notes.outputs.body }}
