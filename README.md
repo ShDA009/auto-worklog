@@ -4,60 +4,40 @@
 
 ## Возможности
 
-- **plan** — построение плана рабочей нагрузки
-- **apply** — отправка worklog в Jira через Tempo Timesheets API
+- **plan** -- построение плана рабочей нагрузки
+- **apply** -- отправка worklog в Jira через Tempo Timesheets API
 - Поддержка диапазонов дат с исключением выходных
 - Автопривязка встреч к issue по ключу в теме (ODP-123)
-- Распределение оставшегося времени по Jira issue
-- Оптимизация: весь диапазон в **одном API запросе**
-
-## Быстрый старт
-
-Обязательные переменные в `.env`:
-```
-DEFAULT_ISSUE=ODP-1000
-EWS_URL=https://...
-EWS_USERNAME=user@mail.com
-EWS_PASSWORD=***
-JIRA_BASE_URL=https://your-domain.atlassian.net
-JIRA_EMAIL=user@mail.com
-JIRA_API_TOKEN=***
-```
+- Коэффициент 1.2x на длительность встреч (кроме all-day и 8-часовых)
+- Дедупликация: повторный apply не создаёт дубли (сигнатура по `[HH:MM] comment` + duration)
+- Распределение оставшегося времени по Jira issue (weighted по пересечению интервалов)
 
 Примеры:
 ```sh
-# План на сегодня
-./worklog plan
+# Списать время/показать план на сегодня
+./worklog apply/plan
 
-# План на дату
-./worklog plan -d 2026-03-27
+# Списать время/показать план на дату
+./worklog apply/plan -d 2026-03-27
 
-# План на диапазон (выходные исключены автоматически)
-./worklog plan -d 2026-03-24:2026-03-28
-
-# Применить worklogs в Jira
-./worklog apply -d 2026-03-27
+# Списать время/показат план на диапазон (выходные исключены)
+./worklog apply/plan -d 2026-03-24:2026-03-28
 
 # Кастомные часы в день (по умолчанию 8)
-./worklog plan -d 2026-03-27 -h 6
+./worklog apply/plan -d 2026-03-27 -h 6
 ```
 
-## Конфигурация
+## Конфигурация .env
 
-**Обязательные:**
 | Переменная | Описание |
 |---|---|
 | DEFAULT_ISSUE | Default issue для неизвестных встреч (ODP-1000) |
-| EWS_URL | URL Exchange Web Services |
+| EWS_URL | URL Exchange Web Services https://mail.example.com/EWS/Exchange.asmx|
 | EWS_USERNAME | Почта или логин |
 | EWS_PASSWORD | Пароль |
 | JIRA_BASE_URL | URL Jira (http://jira.example.com) |
 | JIRA_EMAIL | Email для API доступа |
 | JIRA_API_TOKEN | Пароль или API token |
-
-**Опциональные:**
-| Переменная | Пример | Описание |
-|---|---|---|
 | EWS_IGNORED_MEETINGS | занят,обед | Встречи для игнорирования |
 | JIRA_IGNORED_STATUSES | Новый | Статусы не для учёта |
 | JIRA_DAY_CLOSE_STATUSES | Закрыт,Closed,Отменен,Отменён,"Включен в релиз" | Статусы "день закрыт" |
@@ -89,7 +69,7 @@ CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -o bin/worklog.exe ./cmd/worklo
 
 ## Требования
 
-- Go 1.20+
+- Go 1.24+
 - EWS доступ (Exchange)
 - Jira API доступ
 - Tempo Timesheets (плагин Jira)
@@ -98,12 +78,30 @@ CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -o bin/worklog.exe ./cmd/worklo
 
 ```sh
 go test ./...
+
+# С race detector
+go test -race ./...
+
+# С покрытием
+go test -cover ./...
 ```
+
+## CI/CD
+
+При пуше тега `v*` GitHub Actions собирает бинарники для darwin-arm64, darwin-amd64, linux-amd64, windows-amd64 и создаёт GitHub Release.
 
 ## Архитектура
 
-- `cmd/worklog` — CLI точка входа
-- `internal/app` — парсинг и рендеринг
-- `internal/domain` — бизнес-логика
-- `internal/integrations/ews` — Exchange интеграция
-- `internal/integrations/jira` — Jira интеграция
+```
+cmd/worklog/              CLI точка входа, оркестрация plan/apply
+internal/
+  app/                    Рендеринг плана (tabwriter)
+  domain/
+    meeting_worklog.go    MeetingEvent -> WorklogEntry (буфер 1.2x, [HH:MM] префикс)
+    activity_worklog.go   IssueActivityInterval -> WorklogEntry (weighted allocation)
+  integrations/
+    ews/                  Exchange Web Services (NTLM, SOAP/XML)
+    jira/
+      client.go           Jira REST API + changelog -> activity intervals
+      worklog.go          Tempo Timesheets API (create/dedup worklogs)
+```
