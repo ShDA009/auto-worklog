@@ -102,36 +102,57 @@ func BuildActivityWorklogs(intervals []IssueActivityInterval, remainingMinutes i
 }
 
 func buildIssueWeights(intervals []IssueActivityInterval) map[string]float64 {
-	type minuteKey int64
-
-	activeByMinute := make(map[minuteKey]map[string]struct{})
-	for _, interval := range intervals {
-		if interval.IssueKey == "" {
-			continue
-		}
-		if !interval.End.After(interval.Start) {
-			continue
-		}
-
-		startMinute := interval.Start.Unix() / 60
-		endMinute := interval.End.Unix() / 60
-		for m := startMinute; m < endMinute; m++ {
-			key := minuteKey(m)
-			if _, ok := activeByMinute[key]; !ok {
-				activeByMinute[key] = make(map[string]struct{})
-			}
-			activeByMinute[key][interval.IssueKey] = struct{}{}
-		}
+	// Collect all unique minute boundaries where active issue set changes
+	type event struct {
+		minute   int64
+		issueKey string
+		isStart  bool
 	}
 
-	weights := make(map[string]float64)
-	for _, issues := range activeByMinute {
-		if len(issues) == 0 {
+	var events []event
+	for _, iv := range intervals {
+		if iv.IssueKey == "" || !iv.End.After(iv.Start) {
 			continue
 		}
-		step := 1.0 / float64(len(issues))
-		for issueKey := range issues {
-			weights[issueKey] += step
+		startMin := iv.Start.Unix() / 60
+		endMin := iv.End.Unix() / 60
+		events = append(events,
+			event{minute: startMin, issueKey: iv.IssueKey, isStart: true},
+			event{minute: endMin, issueKey: iv.IssueKey, isStart: false},
+		)
+	}
+	if len(events) == 0 {
+		return nil
+	}
+
+	sort.Slice(events, func(i, j int) bool {
+		if events[i].minute != events[j].minute {
+			return events[i].minute < events[j].minute
+		}
+		// Process ends before starts at the same minute
+		return !events[i].isStart && events[j].isStart
+	})
+
+	weights := make(map[string]float64)
+	active := make(map[string]int) // issueKey -> count of overlapping intervals
+	prevMinute := events[0].minute
+
+	for _, ev := range events {
+		if ev.minute > prevMinute && len(active) > 0 {
+			span := float64(ev.minute - prevMinute)
+			step := span / float64(len(active))
+			for key := range active {
+				weights[key] += step
+			}
+		}
+		prevMinute = ev.minute
+		if ev.isStart {
+			active[ev.issueKey]++
+		} else {
+			active[ev.issueKey]--
+			if active[ev.issueKey] <= 0 {
+				delete(active, ev.issueKey)
+			}
 		}
 	}
 

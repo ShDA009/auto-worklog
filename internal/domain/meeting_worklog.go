@@ -19,7 +19,9 @@ type MeetingEvent struct {
 	Title           string
 	DurationMinutes int
 	IsAllDayEvent   bool
-	StartTime       time.Time
+	// StartTime is the meeting start in the user's local timezone.
+	// Required for non-all-day events; used to build the [HH:MM] comment prefix.
+	StartTime time.Time
 }
 
 type WorklogEntry struct {
@@ -75,7 +77,7 @@ func BuildMeetingWorklogs(meetings []MeetingEvent, defaultIssue string, ignoredT
 		if ExtractIssueKey(meeting.Title) != "" {
 			comment = `Встреча "` + comment + `"`
 		}
-		if !meeting.IsAllDayEvent && !meeting.StartTime.IsZero() {
+		if !meeting.IsAllDayEvent {
 			comment = fmt.Sprintf("[%s] %s", meeting.StartTime.Format("15:04"), comment)
 		}
 

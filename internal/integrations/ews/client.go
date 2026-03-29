@@ -80,6 +80,7 @@ func (c Client) FetchMeetings(ctx context.Context, date time.Time, timezone stri
 	if client == nil {
 		client = &http.Client{
 			Transport: ntlmssp.Negotiator{RoundTripper: http.DefaultTransport},
+			Timeout:   30 * time.Second,
 		}
 	}
 

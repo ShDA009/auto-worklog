@@ -138,15 +138,17 @@ func (c Client) FetchActivityIntervalsForRange(
 	}
 
 	intervals := make([]domain.IssueActivityInterval, 0)
-	
-	// Process each date in range to extract intervals
+
 	rangeStart := time.Date(fromDate.Year(), fromDate.Month(), fromDate.Day(), 0, 0, 0, 0, loc)
 	rangeEnd := toDate.Add(24 * time.Hour)
-	
+
 	for d := rangeStart; d.Before(rangeEnd); d = d.AddDate(0, 0, 1) {
+		if d.Weekday() == time.Saturday || d.Weekday() == time.Sunday {
+			continue
+		}
 		dayStart := d
 		dayEnd := d.Add(24 * time.Hour)
-		
+
 		for _, issue := range issues {
 			intervals = append(intervals, buildIssueIntervals(issue, me, dayStart, dayEnd, rules)...)
 		}
@@ -225,8 +227,7 @@ func (c Client) fetchIssuesWithChangelog(ctx context.Context, fromDate, toDate t
 		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 			body, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
 			resp.Body.Close()
-			fmt.Print(jql+"\n")
-			return nil, fmt.Errorf("jira search status: %s\nbody: %s", resp.Status, string(body))
+			return nil, fmt.Errorf("jira search status: %s\njql: %s\nbody: %s", resp.Status, jql, string(body))
 		}
 		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 			resp.Body.Close()
@@ -248,7 +249,7 @@ func (c Client) httpClient() *http.Client {
 	if c.HTTPClient != nil {
 		return c.HTTPClient
 	}
-	return http.DefaultClient
+	return &http.Client{Timeout: 30 * time.Second}
 }
 
 func buildIssueIntervals(
@@ -429,11 +430,11 @@ func containsNormalized(items []string, value string) bool {
 	return false
 }
 
+var envVarRegexp = regexp.MustCompile(`\$\{([A-Z0-9_]+)\}`)
+
 func expandEnvVars(template string) string {
-	// Replace ${VAR_NAME} with os.Getenv("VAR_NAME")
-	re := regexp.MustCompile(`\$\{([A-Z_]+)\}`)
-	return re.ReplaceAllStringFunc(template, func(match string) string {
-		varName := match[2 : len(match)-1] // Extract VAR_NAME from ${VAR_NAME}
+	return envVarRegexp.ReplaceAllStringFunc(template, func(match string) string {
+		varName := match[2 : len(match)-1]
 		return os.Getenv(varName)
 	})
 }

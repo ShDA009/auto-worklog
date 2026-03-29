@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"fmt"
 	"testing"
 	"time"
 )
@@ -20,7 +21,6 @@ func TestExtractIssueKey(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
@@ -130,8 +130,7 @@ func TestApplyMeetingBufferMinutes(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt
-		t.Run("", func(t *testing.T) {
+		t.Run(fmt.Sprintf("input_%d", tt.in), func(t *testing.T) {
 			t.Parallel()
 			actual := ApplyMeetingBufferMinutes(tt.in)
 			if actual != tt.expected {
@@ -155,7 +154,6 @@ func TestIsIgnoredMeetingTitle(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt
 		t.Run(tt.title, func(t *testing.T) {
 			t.Parallel()
 			got := isIgnoredMeetingTitle(tt.title, []string{"занят", "обед"})

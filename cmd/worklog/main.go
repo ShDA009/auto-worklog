@@ -86,6 +86,11 @@ func parseDateOrRange(dateStr, timezone string) ([]time.Time, error) {
 			return nil, errors.New("invalid date range format, use YYYY-MM-DD:YYYY-MM-DD")
 		}
 
+		loc, err := time.LoadLocation(timezone)
+		if err != nil {
+			return nil, fmt.Errorf("load timezone %q: %w", timezone, err)
+		}
+
 		fromDate, err := time.Parse("2006-01-02", strings.TrimSpace(parts[0]))
 		if err != nil {
 			return nil, fmt.Errorf("parse from date: %w", err)
@@ -100,15 +105,8 @@ func parseDateOrRange(dateStr, timezone string) ([]time.Time, error) {
 			return nil, errors.New("to date must be after from date")
 		}
 
-		// Generate list of working days (excluding weekends)
-		loc, err := time.LoadLocation(timezone)
-		if err != nil {
-			return nil, fmt.Errorf("load timezone %q: %w", timezone, err)
-		}
-
 		var dates []time.Time
 		for d := fromDate; !d.After(toDate); d = d.AddDate(0, 0, 1) {
-			// Skip weekends (Saturday=6, Sunday=0)
 			if d.Weekday() != time.Saturday && d.Weekday() != time.Sunday {
 				dates = append(dates, time.Date(d.Year(), d.Month(), d.Day(), 0, 0, 0, 0, loc))
 			}
@@ -165,7 +163,11 @@ func runPlan(args []string, out io.Writer) error {
 	// Fetch Jira intervals for entire date range once
 	var cachedIntervals []domain.IssueActivityInterval
 	if opts.withJira {
-		cachedIntervals, _ = loadJiraIntervalsForRange(dates, defaultTimezone)
+		var err error
+		cachedIntervals, err = loadJiraIntervalsForRange(dates, defaultTimezone)
+		if err != nil {
+			return fmt.Errorf("load jira intervals: %w", err)
+		}
 	}
 
 	for i, date := range dates {
@@ -200,7 +202,11 @@ func runApply(args []string, in io.Reader, out io.Writer) error {
 	// Fetch Jira intervals for entire date range once
 	var cachedIntervals []domain.IssueActivityInterval
 	if opts.withJira {
-		cachedIntervals, _ = loadJiraIntervalsForRange(dates, defaultTimezone)
+		var err error
+		cachedIntervals, err = loadJiraIntervalsForRange(dates, defaultTimezone)
+		if err != nil {
+			return fmt.Errorf("load jira intervals: %w", err)
+		}
 	}
 
 	// Display plan for all dates
@@ -262,7 +268,6 @@ func runApply(args []string, in io.Reader, out io.Writer) error {
 	return nil
 }
 
-
 func buildPlanAllocationForDate(date time.Time, opts planOptions, cachedIntervals []domain.IssueActivityInterval) (domain.DailyAllocation, time.Time, error) {
 	defaultIssueKey, err := defaultIssueFromEnv()
 	if err != nil {
@@ -316,14 +321,29 @@ func loadDotEnv(path string) error {
 	return godotenv.Overload(path)
 }
 
+func applyManagerFallback(activity *domain.DailyAllocation, remaining int, defaultIssueKey string) {
+	if len(activity.Items) > 0 || remaining <= 0 {
+		return
+	}
+	isManager := strings.EqualFold(strings.TrimSpace(os.Getenv("IS_MANAGER")), "true")
+	if isManager {
+		activity.Items = append(activity.Items, domain.WorklogEntry{
+			IssueKey: defaultIssueKey,
+			Minutes:  remaining,
+			Source:   domain.SourceActivity,
+			Comment:  strings.TrimSpace(os.Getenv("MANAGER_ACTIVITY_COMMENT")),
+			WorkType: strings.TrimSpace(os.Getenv("WORK_TYPE")),
+		})
+		activity.TotalMinutes = remaining
+	} else {
+		activity.Unallocated = remaining
+	}
+}
+
 func loadJiraAllocation(date time.Time, timezone string, remaining int, defaultIssueKey string, cachedIntervals []domain.IssueActivityInterval) (domain.DailyAllocation, error) {
 	if remaining <= 0 {
 		return domain.DailyAllocation{}, nil
 	}
-
-	isManager := strings.EqualFold(strings.TrimSpace(os.Getenv("IS_MANAGER")), "true")
-	workType := strings.TrimSpace(os.Getenv("WORK_TYPE"))
-	managerComment := strings.TrimSpace(os.Getenv("MANAGER_ACTIVITY_COMMENT"))
 
 	// If pre-cached intervals provided, filter for this date only
 	if len(cachedIntervals) > 0 {
@@ -331,46 +351,27 @@ func loadJiraAllocation(date time.Time, timezone string, remaining int, defaultI
 		if err != nil {
 			return domain.DailyAllocation{}, fmt.Errorf("load timezone: %w", err)
 		}
-		
+
 		dayStart := time.Date(date.Year(), date.Month(), date.Day(), 0, 0, 0, 0, loc)
 		dayEnd := dayStart.Add(24 * time.Hour)
-		
-		// Filter intervals for this specific date
+
 		var filtered []domain.IssueActivityInterval
 		for _, interval := range cachedIntervals {
 			if interval.Start.Before(dayEnd) && interval.End.After(dayStart) {
 				filtered = append(filtered, interval)
 			}
 		}
-		
+
 		activity := domain.BuildActivityWorklogs(filtered, remaining)
-		if len(activity.Items) == 0 && remaining > 0 {
-			if isManager {
-				// Manager: allocate unspent time to DEFAULT_ISSUE with manager comment and work type
-				activity.Items = append(activity.Items, domain.WorklogEntry{
-					IssueKey: defaultIssueKey,
-					Minutes:  remaining,
-					Source:   domain.SourceActivity,
-					Comment:  managerComment,
-					WorkType: workType,
-				})
-				activity.TotalMinutes = remaining
-			} else {
-				// Non-manager: mark time as unallocated, do not add to worklog
-				activity.Unallocated = remaining
-			}
-		}
+		applyManagerFallback(&activity, remaining, defaultIssueKey)
 		return activity, nil
 	}
 
 	// Fallback: fetch single day (for backward compatibility)
-	baseURL := os.Getenv("JIRA_BASE_URL")
-	email := os.Getenv("JIRA_EMAIL")
-	token := os.Getenv("JIRA_API_TOKEN")
 	client := jira.Client{
-		BaseURL:  baseURL,
-		Email:    email,
-		APIToken: token,
+		BaseURL:  os.Getenv("JIRA_BASE_URL"),
+		Email:    os.Getenv("JIRA_EMAIL"),
+		APIToken: os.Getenv("JIRA_API_TOKEN"),
 	}
 	rules := loadJiraStatusRulesFromEnv()
 	intervals, err := client.FetchActivityIntervals(context.Background(), date, timezone, rules)
@@ -379,22 +380,7 @@ func loadJiraAllocation(date time.Time, timezone string, remaining int, defaultI
 	}
 
 	activity := domain.BuildActivityWorklogs(intervals, remaining)
-	if len(activity.Items) == 0 && remaining > 0 {
-		if isManager {
-			// Manager: allocate unspent time to DEFAULT_ISSUE with manager comment and work type
-			activity.Items = append(activity.Items, domain.WorklogEntry{
-				IssueKey: defaultIssueKey,
-				Minutes:  remaining,
-				Source:   domain.SourceActivity,
-				Comment:  managerComment,
-				WorkType: workType,
-			})
-			activity.TotalMinutes = remaining
-		} else {
-			// Non-manager: mark time as unallocated, do not add to worklog
-			activity.Unallocated = remaining
-		}
-	}
+	applyManagerFallback(&activity, remaining, defaultIssueKey)
 	return activity, nil
 }
 
@@ -431,16 +417,16 @@ func defaultIssueFromEnv() (string, error) {
 }
 
 func resolveDate(raw, timezone string) (time.Time, error) {
+	loc, err := time.LoadLocation(timezone)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("load timezone %q: %w", timezone, err)
+	}
 	if strings.TrimSpace(raw) != "" {
 		date, err := time.Parse("2006-01-02", raw)
 		if err != nil {
 			return time.Time{}, fmt.Errorf("parse --date: %w", err)
 		}
-		return date, nil
-	}
-	loc, err := time.LoadLocation(timezone)
-	if err != nil {
-		return time.Time{}, fmt.Errorf("load timezone %q: %w", timezone, err)
+		return time.Date(date.Year(), date.Month(), date.Day(), 0, 0, 0, 0, loc), nil
 	}
 	now := time.Now().In(loc)
 	return time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc), nil

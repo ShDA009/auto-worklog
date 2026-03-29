@@ -21,6 +21,6 @@ func RenderMeetingPlan(w io.Writer, allocation domain.DailyAllocation) {
 	
 	if allocation.Unallocated > 0 {
 		unallocatedHours := float64(allocation.Unallocated) / 60.0
-		fmt.Fprintf(w, "⚠ Unallocated: %.1f hours - requires manual distribution\n", unallocatedHours)
+		fmt.Fprintf(w, "WARNING Unallocated: %.1f hours - requires manual distribution\n", unallocatedHours)
 	}
 }

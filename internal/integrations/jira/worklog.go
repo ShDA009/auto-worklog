@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"regexp"
 	"strings"
 	"time"
 
@@ -223,12 +225,17 @@ func (c Client) createWorklog(
 	return nil
 }
 
+var issueKeyPattern = regexp.MustCompile(`^[A-Z][A-Z0-9]+-\d+$`)
+
 func (c Client) resolveIssueID(ctx context.Context, issueKey string) (int, error) {
+	if !issueKeyPattern.MatchString(issueKey) {
+		return 0, fmt.Errorf("invalid issue key: %q", issueKey)
+	}
 	base := strings.TrimRight(c.BaseURL, "/")
 	req, err := http.NewRequestWithContext(
 		ctx,
 		http.MethodGet,
-		fmt.Sprintf("%s/rest/api/2/issue/%s?fields=", base, issueKey),
+		fmt.Sprintf("%s/rest/api/2/issue/%s?fields=", base, url.PathEscape(issueKey)),
 		nil,
 	)
 	if err != nil {
