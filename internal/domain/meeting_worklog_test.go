@@ -1,6 +1,9 @@
 package domain
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestExtractIssueKey(t *testing.T) {
 	t.Parallel()
@@ -32,14 +35,15 @@ func TestExtractIssueKey(t *testing.T) {
 func TestBuildMeetingWorklogs(t *testing.T) {
 	t.Parallel()
 
+	base := time.Date(2026, 3, 26, 0, 0, 0, 0, time.UTC)
 	meetings := []MeetingEvent{
-		{Title: "Daily ODP-1111", DurationMinutes: 60},
-		{Title: "Planning ODP-1111", DurationMinutes: 30},
-		{Title: "Interview https://ihelp/browse/ODP-73459 2ЛТП", DurationMinutes: 45},
-		{Title: "Занят", DurationMinutes: 60},
-		{Title: "  обед  ", DurationMinutes: 30},
-		{Title: "Zero duration ODP-2222", DurationMinutes: 0},
-		{Title: "Invalid duration ODP-3333", DurationMinutes: -5},
+		{Title: "Daily ODP-1111", DurationMinutes: 60, StartTime: base.Add(10 * time.Hour)},
+		{Title: "Planning ODP-1111", DurationMinutes: 30, StartTime: base.Add(14 * time.Hour)},
+		{Title: "Interview https://ihelp/browse/ODP-73459 2ЛТП", DurationMinutes: 45, StartTime: base.Add(16 * time.Hour)},
+		{Title: "Занят", DurationMinutes: 60, StartTime: base.Add(12 * time.Hour)},
+		{Title: "  обед  ", DurationMinutes: 30, StartTime: base.Add(13 * time.Hour)},
+		{Title: "Zero duration ODP-2222", DurationMinutes: 0, StartTime: base.Add(9 * time.Hour)},
+		{Title: "Invalid duration ODP-3333", DurationMinutes: -5, StartTime: base.Add(11 * time.Hour)},
 	}
 
 	got := BuildMeetingWorklogs(meetings, "ODP-2933", []string{"занят", "обед"})
@@ -57,9 +61,9 @@ func TestBuildMeetingWorklogs(t *testing.T) {
 		minutes  int
 		comment  string
 	}{
-		{issueKey: "ODP-1111", minutes: 72, comment: `Встреча "Daily ODP-1111"`},
-		{issueKey: "ODP-1111", minutes: 36, comment: `Встреча "Planning ODP-1111"`},
-		{issueKey: "ODP-73459", minutes: 54, comment: `Встреча "Interview 2ЛТП"`},
+		{issueKey: "ODP-1111", minutes: 72, comment: `[10:00] Встреча "Daily ODP-1111"`},
+		{issueKey: "ODP-1111", minutes: 36, comment: `[14:00] Встреча "Planning ODP-1111"`},
+		{issueKey: "ODP-73459", minutes: 54, comment: `[16:00] Встреча "Interview 2ЛТП"`},
 	}
 
 	for i, item := range got.Items {
@@ -93,8 +97,9 @@ func TestSanitizeMeetingComment(t *testing.T) {
 func TestBuildMeetingWorklogsFallbackComment(t *testing.T) {
 	t.Parallel()
 
+	start := time.Date(2026, 3, 26, 11, 30, 0, 0, time.UTC)
 	meetings := []MeetingEvent{
-		{Title: "Обсуждение без ключа", DurationMinutes: 30},
+		{Title: "Обсуждение без ключа", DurationMinutes: 30, StartTime: start},
 	}
 
 	got := BuildMeetingWorklogs(meetings, "ODP-2933", []string{"занят", "обед"})
@@ -104,8 +109,9 @@ func TestBuildMeetingWorklogsFallbackComment(t *testing.T) {
 	if got.Items[0].IssueKey != "ODP-2933" {
 		t.Fatalf("issue = %s, want ODP-2933", got.Items[0].IssueKey)
 	}
-	if got.Items[0].Comment != "Обсуждение без ключа" {
-		t.Fatalf("comment = %q, want %q", got.Items[0].Comment, "Обсуждение без ключа")
+	wantComment := "[11:30] Обсуждение без ключа"
+	if got.Items[0].Comment != wantComment {
+		t.Fatalf("comment = %q, want %q", got.Items[0].Comment, wantComment)
 	}
 }
 
@@ -163,10 +169,11 @@ func TestIsIgnoredMeetingTitle(t *testing.T) {
 func TestBuildMeetingWorklogs_AllDayEvent(t *testing.T) {
 	t.Parallel()
 
+	base := time.Date(2026, 3, 26, 0, 0, 0, 0, time.UTC)
 	meetings := []MeetingEvent{
 		{Title: "Плановый отпуск ODP-2933", DurationMinutes: 480, IsAllDayEvent: true},
-		{Title: "Full day meeting ODP-1111", DurationMinutes: 480, IsAllDayEvent: false},
-		{Title: "Daily ODP-1111", DurationMinutes: 60, IsAllDayEvent: false},
+		{Title: "Full day meeting ODP-1111", DurationMinutes: 480, IsAllDayEvent: false, StartTime: base.Add(9 * time.Hour)},
+		{Title: "Daily ODP-1111", DurationMinutes: 60, IsAllDayEvent: false, StartTime: base.Add(10 * time.Hour)},
 	}
 
 	got := BuildMeetingWorklogs(meetings, "ODP-2933", []string{})

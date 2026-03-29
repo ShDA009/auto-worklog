@@ -168,6 +168,7 @@ func (c Client) FetchMeetings(ctx context.Context, date time.Time, timezone stri
 		meetings = append(meetings, domain.MeetingEvent{
 			Title:           item.Subject,
 			DurationMinutes: duration,
+			StartTime:       eventStart,
 		})
 	}
 

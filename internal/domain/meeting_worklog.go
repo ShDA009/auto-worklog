@@ -1,9 +1,11 @@
 package domain
 
 import (
+	"fmt"
 	"math"
 	"regexp"
 	"strings"
+	"time"
 )
 
 const (
@@ -17,6 +19,7 @@ type MeetingEvent struct {
 	Title           string
 	DurationMinutes int
 	IsAllDayEvent   bool
+	StartTime       time.Time
 }
 
 type WorklogEntry struct {
@@ -71,6 +74,9 @@ func BuildMeetingWorklogs(meetings []MeetingEvent, defaultIssue string, ignoredT
 		comment := sanitizeMeetingComment(meeting.Title)
 		if ExtractIssueKey(meeting.Title) != "" {
 			comment = `Встреча "` + comment + `"`
+		}
+		if !meeting.IsAllDayEvent && !meeting.StartTime.IsZero() {
+			comment = fmt.Sprintf("[%s] %s", meeting.StartTime.Format("15:04"), comment)
 		}
 
 		allocation.Items = append(allocation.Items, WorklogEntry{
