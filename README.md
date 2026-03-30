@@ -107,3 +107,7 @@ internal/
       client.go           Jira REST API + changelog -> activity intervals
       worklog.go          Tempo Timesheets API (create/dedup worklogs)
 ```
+
+## Лицензия
+
+[PolyForm Noncommercial 1.0.0](LICENSE) — свободное использование в некоммерческих целях. Коммерческое использование запрещено без отдельного соглашения.
