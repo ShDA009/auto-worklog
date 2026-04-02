@@ -6,11 +6,11 @@
 
 - **plan** -- построение плана рабочей нагрузки
 - **apply** -- отправка worklog в Jira через Tempo Timesheets API
-- Поддержка диапазонов дат с исключением выходных
-- Автопривязка встреч к issue по ключу в теме (ODP-123)
-- Коэффициент 1.2x на длительность встреч (кроме all-day и 8-часовых)
-- Дедупликация: повторный apply не создаёт дубли (сигнатура по `[HH:MM] comment` + duration)
-- Распределение оставшегося времени по Jira issue (weighted по пересечению интервалов)
+  - Поддержка диапазонов дат с исключением выходных
+  - Автопривязка встреч к issue по ключу в теме (YOU_PROJECT-123)
+  - Коэффициент 1.2x на длительность встреч (кроме all-day и 8-часовых)
+  - Дедупликация: повторный apply не создаёт дубли (сигнатура по `[HH:MM] comment` + duration)
+  - Распределение оставшегося времени по Jira issue (weighted по пересечению интервалов)
 
 Примеры:
 ```sh
@@ -35,18 +35,18 @@
 |---|---|
 | DEFAULT_ISSUE | Default issue для неизвестных встреч (YOU_PROJECT-1000) |
 | EWS_URL | URL Exchange Web Services https://mail.example.com/EWS/Exchange.asmx|
-| EWS_USERNAME | Почта или логин |
+| EWS_USERNAME | Почта |
 | EWS_PASSWORD | Пароль |
 | JIRA_BASE_URL | URL Jira (http://jira.example.com) |
 | JIRA_EMAIL | Email для API доступа |
 | JIRA_API_TOKEN | Пароль или API token |
-| EWS_IGNORED_MEETINGS | занят,обед | Встречи для игнорирования |
-| JIRA_IGNORED_STATUSES | Новый | Статусы не для учёта |
-| JIRA_DAY_CLOSE_STATUSES | Закрыт,Closed,Отменен,Отменён,"Включен в релиз" | Статусы "день закрыт" |
-| JIRA_JQL_TEMPLATE | project = YOU_PROJECT AND (status NOT IN (${JIRA_IGNORED_STATUSES}) AND issuetype NOT IN (Epic) AND ((assignee = currentUser() AND status NOT IN (${JIRA_DAY_CLOSE_STATUSES})) OR	(assignee WAS currentUser() AND updated >= "%s")) OR reporter = currentUser() AND updated >= "%s") | Custom JQL (поддержка ${VAR} и %s) |
-| WORK_TYPE | Руководство | Вид работ (атрибут Tempo: Руководство, Разработка, Аналитика, Тестирование) |
-| IS_MANAGER | false | Распределять неиспользованное время |
-| MANAGER_ACTIVITY_COMMENT | Координация и синхронизация задач | Comment для менеджерского времени |
+| EWS_IGNORED_MEETINGS | Названия встреч для игнорирования |
+| JIRA_PROJECT | Ключ проекта для фильтрации |
+| JIRA_IGNORED_STATUSES | Статусы не для учёта |
+| JIRA_DAY_CLOSE_STATUSES | Статусы "день закрыт", следующие дни не учитываются |
+| WORK_TYPE | Вид работ (атрибут Tempo: Руководство, Разработка, Аналитика, Тестирование) |
+| IS_MANAGER | Распределять неиспользованное время |
+| MANAGER_ACTIVITY_COMMENT | Comment для учета менеджерского времени |
 
 ## Флаги команды
 

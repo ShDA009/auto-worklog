@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -27,6 +26,10 @@ type Client struct {
 type StatusRules struct {
 	IgnoredStatuses  []string
 	DayCloseStatuses []string
+}
+
+func DefaultStatusRules() StatusRules {
+	return StatusRules{}
 }
 
 type userInfo struct {
@@ -92,6 +95,9 @@ func (c Client) FetchActivityIntervals(
 ) ([]domain.IssueActivityInterval, error) {
 	if c.BaseURL == "" || c.Email == "" || c.APIToken == "" {
 		return nil, errors.New("JIRA_BASE_URL/JIRA_EMAIL/JIRA_API_TOKEN are not set")
+	}
+	if strings.TrimSpace(os.Getenv("JIRA_PROJECT")) == "" {
+		return nil, errors.New("JIRA_PROJECT is not set")
 	}
 
 	loc, err := time.LoadLocation(timezone)
@@ -191,25 +197,10 @@ func (c Client) fetchMyself(ctx context.Context) (userInfo, error) {
 func (c Client) fetchIssuesWithChangelog(ctx context.Context, fromDate, toDate time.Time) ([]jiraIssue, error) {
 	base := strings.TrimRight(c.BaseURL, "/") + "/rest/api/2/search"
 
-	jqlTemplate := os.Getenv("JIRA_JQL_TEMPLATE")
-	if strings.TrimSpace(jqlTemplate) == "" {
-		return nil, errors.New("JIRA_JQL_TEMPLATE is not set")
-	}
-
-	// Expand environment variables in template (e.g., ${JIRA_IGNORED_STATUSES})
-	jqlTemplate = expandEnvVars(jqlTemplate)
-
 	// Build date string for JQL - use from date as lower bound only
 	// (upper bound excluded to capture tasks updated after range end)
 	fromTimeStr := fromDate.Format("2006-01-02") + " 00:00"
-	
-	// Count %s placeholders to pass the correct number of arguments
-	placeholderCount := strings.Count(jqlTemplate, "%s")
-	args := make([]any, placeholderCount)
-	for i := range args {
-		args[i] = fromTimeStr
-	}
-	jql := fmt.Sprintf(jqlTemplate, args...)
+	jql := buildJQL(fromTimeStr)
 
 	startAt := 0
 	const pageSize = 100
@@ -271,19 +262,74 @@ func buildIssueIntervals(
 	dayEnd time.Time,
 	rules StatusRules,
 ) []domain.IssueActivityInterval {
-	// Parse issue creation time to avoid showing it on days before it existed
-	var issueCreatedAt time.Time
+	var createdAt time.Time
 	if issue.Fields.Created != "" {
 		if t, err := parseJiraTime(issue.Fields.Created); err == nil {
-			issueCreatedAt = t
-			if !issueCreatedAt.Before(dayEnd) {
+			if !t.Before(dayEnd) {
 				return nil // issue didn't exist yet on this day
 			}
+			createdAt = t
 		}
 	}
 
-	events := make([]timedChange, 0, len(issue.Changelog.Histories))
-	for _, h := range issue.Changelog.Histories {
+	events := parseChangelog(issue.Changelog.Histories)
+	state := rewindStateToDay(issueState{issue.Fields.Status.Name, assigneeValue(issue)}, events, dayStart)
+	statusChain := collectStatusChain(state.status, events, dayStart, dayEnd)
+
+	cursor := dayStart
+	if !createdAt.IsZero() && createdAt.After(cursor) {
+		cursor = createdAt
+	}
+
+	active := isSelfAssignee(state.assignee, me) && !isIgnoredStatus(state.status, rules)
+	intervals := make([]domain.IssueActivityInterval, 0)
+
+	// Creation activity: always logged for the reporter on the day the issue was created,
+	// regardless of other changes on that day (by other assignees etc.)
+	if !createdAt.IsZero() && !createdAt.Before(dayStart) && isSelfReporter(issue, me) {
+		iv := newInterval(issue, state.status, "", "", createdAt, dayEnd)
+		iv.StatusChain = statusChain
+		iv.IsCreation = true
+		intervals = append(intervals, iv)
+	}
+
+	for _, e := range events {
+		if e.At.Before(dayStart) {
+			continue
+		}
+		if e.At.After(dayEnd) {
+			break
+		}
+		if active && e.At.After(cursor) {
+			transferredTo := ""
+			if e.Change.assigneeTo != "" && !isSelfAssignee(e.Change.assigneeTo, me) {
+				transferredTo = e.Change.assigneeTo
+			}
+			intervals = append(intervals, newInterval(issue, state.status, e.Change.statusTo, transferredTo, cursor, e.At))
+		}
+		if e.Change.statusTo != "" {
+			state.status = e.Change.statusTo
+		}
+		if e.Change.assigneeTo != "" {
+			state.assignee = e.Change.assigneeTo
+		}
+		cursor = e.At
+		active = isSelfAssignee(state.assignee, me) && !isIgnoredStatus(state.status, rules)
+	}
+
+	if active && dayEnd.After(cursor) && (cursor.After(dayStart) || !isDayCloseStatus(state.status, rules)) {
+		intervals = append(intervals, newInterval(issue, state.status, "", "", cursor, dayEnd))
+	}
+
+	if len(intervals) > 0 {
+		intervals[0].StatusChain = statusChain
+	}
+	return intervals
+}
+
+func parseChangelog(histories []history) []timedChange {
+	events := make([]timedChange, 0, len(histories))
+	for _, h := range histories {
 		tm, err := parseJiraTime(h.Created)
 		if err != nil {
 			continue
@@ -302,15 +348,14 @@ func buildIssueIntervals(
 		events = append(events, timedChange{At: tm, Change: changes})
 	}
 	sort.Slice(events, func(i, j int) bool { return events[i].At.Before(events[j].At) })
+	return events
+}
 
-	state := issueState{
-		status:   issue.Fields.Status.Name,
-		assignee: assigneeValue(issue),
-	}
-
+// rewindStateToDay walks the changelog backwards to reconstruct the issue state at the start of dayStart.
+func rewindStateToDay(state issueState, events []timedChange, dayStart time.Time) issueState {
 	for i := len(events) - 1; i >= 0; i-- {
 		if !events[i].At.After(dayStart) {
-			continue
+			break
 		}
 		if events[i].Change.statusFrom != "" {
 			state.status = events[i].Change.statusFrom
@@ -319,89 +364,33 @@ func buildIssueIntervals(
 			state.assignee = events[i].Change.assigneeFrom
 		}
 	}
+	return state
+}
 
-	// Collect full status chain for the day: starting status + all transitions within [dayStart, dayEnd]
-	statusChain := []string{state.status}
-	for _, event := range events {
-		if event.At.Before(dayStart) || event.At.After(dayEnd) {
+
+func collectStatusChain(startStatus string, events []timedChange, dayStart, dayEnd time.Time) []string {
+	chain := []string{startStatus}
+	for _, e := range events {
+		if e.At.Before(dayStart) || e.At.After(dayEnd) {
 			continue
 		}
-		if event.Change.statusTo != "" && statusChain[len(statusChain)-1] != event.Change.statusTo {
-			statusChain = append(statusChain, event.Change.statusTo)
+		if e.Change.statusTo != "" && chain[len(chain)-1] != e.Change.statusTo {
+			chain = append(chain, e.Change.statusTo)
 		}
 	}
+	return chain
+}
 
-	active := isSelfAssignee(state.assignee, me) && !isIgnoredStatus(state.status, rules)
-	cursor := dayStart
-	// Don't count time before the issue was created
-	if !issueCreatedAt.IsZero() && issueCreatedAt.After(cursor) {
-		cursor = issueCreatedAt
+func newInterval(issue jiraIssue, status, statusTo, transferredTo string, start, end time.Time) domain.IssueActivityInterval {
+	return domain.IssueActivityInterval{
+		IssueKey:      issue.Key,
+		Summary:       issue.Fields.Summary,
+		Status:        status,
+		StatusTo:      statusTo,
+		TransferredTo: transferredTo,
+		Start:         start,
+		End:           end,
 	}
-	intervals := make([]domain.IssueActivityInterval, 0)
-
-	// If no changelog and user is the reporter and issue was created today — add single interval
-	// (status filters don't apply here: the user created the task regardless of its current status)
-	if len(events) == 0 && !isSelfAssignee(state.assignee, me) && isSelfReporter(issue, me) &&
-		!issueCreatedAt.IsZero() && !issueCreatedAt.Before(dayStart) && issueCreatedAt.Before(dayEnd) {
-		return []domain.IssueActivityInterval{{
-			IssueKey:    issue.Key,
-			Summary:     issue.Fields.Summary,
-			Status:      state.status,
-			StatusChain: statusChain,
-			Start:       issueCreatedAt,
-			End:         dayEnd,
-			IsCreation:  true,
-		}}
-	}
-
-	for _, event := range events {
-		if event.At.Before(dayStart) {
-			continue
-		}
-		if event.At.After(dayEnd) {
-			break
-		}
-		if active && event.At.After(cursor) {
-			transferredTo := ""
-			if event.Change.assigneeTo != "" && !isSelfAssignee(event.Change.assigneeTo, me) {
-				transferredTo = event.Change.assigneeTo
-			}
-			intervals = append(intervals, domain.IssueActivityInterval{
-				IssueKey:      issue.Key,
-				Summary:       issue.Fields.Summary,
-				Status:        state.status,
-				StatusTo:      event.Change.statusTo,
-				Start:         cursor,
-				End:           event.At,
-				TransferredTo: transferredTo,
-			})
-		}
-		if event.Change.statusTo != "" {
-			state.status = event.Change.statusTo
-		}
-		if event.Change.assigneeTo != "" {
-			state.assignee = event.Change.assigneeTo
-		}
-		cursor = event.At
-		active = isSelfAssignee(state.assignee, me) && !isIgnoredStatus(state.status, rules)
-	}
-
-	if active && dayEnd.After(cursor) && (cursor.After(dayStart) || !isDayCloseStatus(state.status, rules)) {
-		intervals = append(intervals, domain.IssueActivityInterval{
-			IssueKey: issue.Key,
-			Summary:  issue.Fields.Summary,
-			Status:   state.status,
-			Start:    cursor,
-			End:      dayEnd,
-		})
-	}
-
-	// Attach full status chain to first interval
-	if len(intervals) > 0 && len(statusChain) > 0 {
-		intervals[0].StatusChain = statusChain
-	}
-
-	return intervals
 }
 
 type timedChange struct {
@@ -457,13 +446,14 @@ func containsNormalized(items []string, value string) bool {
 	return false
 }
 
-var envVarRegexp = regexp.MustCompile(`\$\{([A-Z0-9_]+)\}`)
+const jqlBase = `project = %s AND issuetype NOT IN (Epic) AND (status NOT IN (%s) AND ((assignee = currentUser() AND status NOT IN (%s)) OR (assignee WAS currentUser() AND updated >= "%s")) OR (reporter = currentUser() AND updated >= "%s"))`
 
-func expandEnvVars(template string) string {
-	return envVarRegexp.ReplaceAllStringFunc(template, func(match string) string {
-		varName := match[2 : len(match)-1]
-		return os.Getenv(varName)
-	})
+func buildJQL(fromTimeStr string) string {
+	project := strings.TrimSpace(os.Getenv("JIRA_PROJECT"))
+	ignored := strings.TrimSpace(os.Getenv("JIRA_IGNORED_STATUSES"))
+	dayClose := strings.TrimSpace(os.Getenv("JIRA_DAY_CLOSE_STATUSES"))
+	
+	return fmt.Sprintf(jqlBase, project, ignored, dayClose, fromTimeStr, fromTimeStr)
 }
 
 func isSelfAssignee(value string, me userInfo) bool {
