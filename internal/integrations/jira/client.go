@@ -60,6 +60,13 @@ type jiraIssue struct {
 			EmailAddress string `json:"emailAddress"`
 			DisplayName  string `json:"displayName"`
 		} `json:"assignee"`
+		Reporter *struct {
+			AccountID    string `json:"accountId"`
+			Key          string `json:"key"`
+			Name         string `json:"name"`
+			EmailAddress string `json:"emailAddress"`
+			DisplayName  string `json:"displayName"`
+		} `json:"reporter"`
 	} `json:"fields"`
 	Changelog struct {
 		Histories []history `json:"histories"`
@@ -211,7 +218,7 @@ func (c Client) fetchIssuesWithChangelog(ctx context.Context, fromDate, toDate t
 		q.Set("jql", jql)
 		q.Set("startAt", fmt.Sprintf("%d", startAt))
 		q.Set("maxResults", fmt.Sprintf("%d", pageSize))
-		q.Set("fields", "summary,status,assignee,created")
+		q.Set("fields", "summary,status,assignee,reporter,created")
 		q.Set("expand", "changelog")
 
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+"?"+q.Encode(), nil)
@@ -329,6 +336,20 @@ func buildIssueIntervals(
 	}
 	intervals := make([]domain.IssueActivityInterval, 0)
 
+	// If no changelog and user is the reporter and issue was created today — add single interval
+	if len(events) == 0 && !active && isSelfReporter(issue, me) &&
+		!issueCreatedAt.IsZero() && !issueCreatedAt.Before(dayStart) && issueCreatedAt.Before(dayEnd) {
+		return []domain.IssueActivityInterval{{
+			IssueKey:    issue.Key,
+			Summary:     issue.Fields.Summary,
+			Status:      state.status,
+			StatusChain: statusChain,
+			Start:       issueCreatedAt,
+			End:         dayEnd,
+			IsCreation:  true,
+		}}
+	}
+
 	for _, event := range events {
 		if event.At.Before(dayStart) {
 			continue
@@ -361,7 +382,7 @@ func buildIssueIntervals(
 		active = isSelfAssignee(state.assignee, me)
 	}
 
-	if active && dayEnd.After(cursor) && (cursor.After(dayStart)) {
+	if active && dayEnd.After(cursor) {
 		intervals = append(intervals, domain.IssueActivityInterval{
 			IssueKey: issue.Key,
 			Summary:  issue.Fields.Summary,
@@ -450,6 +471,14 @@ func isSelfAssignee(value string, me userInfo) bool {
 		}
 	}
 	return false
+}
+
+func isSelfReporter(issue jiraIssue, me userInfo) bool {
+	if issue.Fields.Reporter == nil {
+		return false
+	}
+	r := issue.Fields.Reporter
+	return isSelfAssignee(firstNonEmpty(r.AccountID, r.Key, r.Name, r.EmailAddress, r.DisplayName), me)
 }
 
 func assigneeValue(issue jiraIssue) string {

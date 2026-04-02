@@ -20,6 +20,7 @@ type IssueActivityInterval struct {
 	Start         time.Time
 	End           time.Time
 	TransferredTo string
+	IsCreation    bool // true when the user is the reporter and there is no changelog
 }
 
 func BuildActivityWorklogs(intervals []IssueActivityInterval, remainingMinutes int) DailyAllocation {
@@ -205,8 +206,18 @@ func buildIssueComments(intervals []IssueActivityInterval) map[string]string {
 			}
 		}
 
+		isCreation := false
+		for _, iv := range data.intervals {
+			if iv.IsCreation {
+				isCreation = true
+				break
+			}
+		}
+
 		comment := `"` + summary + `"`
-		if len(statusChain) > 1 {
+		if isCreation {
+			comment = "Создание " + comment
+		} else if len(statusChain) > 1 {
 			comment += " (" + strings.Join(statusChain, " → ") + ")"
 		} else if len(statusChain) == 1 && strings.EqualFold(strings.TrimSpace(statusChain[0]), "Подтверждение") {
 			comment = "Проверка " + comment
