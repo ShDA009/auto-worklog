@@ -138,6 +138,7 @@ func loadJiraIntervalsForRange(dates []time.Time, timezone string) ([]domain.Iss
 		Email:    email,
 		APIToken: token,
 	}
+	rules := loadJiraStatusRulesFromEnv()
 
 	// Fetch intervals for entire date range in one request
 	return client.FetchActivityIntervalsForRange(
@@ -145,6 +146,7 @@ func loadJiraIntervalsForRange(dates []time.Time, timezone string) ([]domain.Iss
 		dates[0],
 		dates[len(dates)-1],
 		timezone,
+		rules,
 	)
 }
 
@@ -372,7 +374,8 @@ func loadJiraAllocation(date time.Time, timezone string, remaining int, defaultI
 		Email:    os.Getenv("JIRA_EMAIL"),
 		APIToken: os.Getenv("JIRA_API_TOKEN"),
 	}
-	intervals, err := client.FetchActivityIntervals(context.Background(), date, timezone)
+	rules := loadJiraStatusRulesFromEnv()
+	intervals, err := client.FetchActivityIntervals(context.Background(), date, timezone, rules)
 	if err != nil {
 		return domain.DailyAllocation{}, err
 	}
@@ -382,6 +385,16 @@ func loadJiraAllocation(date time.Time, timezone string, remaining int, defaultI
 	return activity, nil
 }
 
+func loadJiraStatusRulesFromEnv() jira.StatusRules {
+	rules := jira.StatusRules{}
+	if v := strings.TrimSpace(os.Getenv("JIRA_IGNORED_STATUSES")); v != "" {
+		rules.IgnoredStatuses = splitCSV(v)
+	}
+	if v := strings.TrimSpace(os.Getenv("JIRA_DAY_CLOSE_STATUSES")); v != "" {
+		rules.DayCloseStatuses = splitCSV(v)
+	}
+	return rules
+}
 
 func splitCSV(value string) []string {
 	parts := strings.Split(value, ",")

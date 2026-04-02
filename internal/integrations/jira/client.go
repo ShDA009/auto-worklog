@@ -88,6 +88,7 @@ func (c Client) FetchActivityIntervals(
 	ctx context.Context,
 	date time.Time,
 	timezone string,
+	rules StatusRules,
 ) ([]domain.IssueActivityInterval, error) {
 	if c.BaseURL == "" || c.Email == "" || c.APIToken == "" {
 		return nil, errors.New("JIRA_BASE_URL/JIRA_EMAIL/JIRA_API_TOKEN are not set")
@@ -111,7 +112,7 @@ func (c Client) FetchActivityIntervals(
 
 	intervals := make([]domain.IssueActivityInterval, 0)
 	for _, issue := range issues {
-		intervals = append(intervals, buildIssueIntervals(issue, me, dayStart, dayEnd)...)
+		intervals = append(intervals, buildIssueIntervals(issue, me, dayStart, dayEnd, rules)...)
 	}
 	return intervals, nil
 }
@@ -121,6 +122,7 @@ func (c Client) FetchActivityIntervalsForRange(
 	fromDate time.Time,
 	toDate time.Time,
 	timezone string,
+	rules StatusRules,
 ) ([]domain.IssueActivityInterval, error) {
 	if c.BaseURL == "" || c.Email == "" || c.APIToken == "" {
 		return nil, errors.New("JIRA_BASE_URL/JIRA_EMAIL/JIRA_API_TOKEN are not set")
@@ -155,7 +157,7 @@ func (c Client) FetchActivityIntervalsForRange(
 		dayEnd := d.Add(24 * time.Hour)
 
 		for _, issue := range issues {
-			intervals = append(intervals, buildIssueIntervals(issue, me, dayStart, dayEnd)...)
+			intervals = append(intervals, buildIssueIntervals(issue, me, dayStart, dayEnd, rules)...)
 		}
 	}
 	
@@ -267,6 +269,7 @@ func buildIssueIntervals(
 	me userInfo,
 	dayStart time.Time,
 	dayEnd time.Time,
+	rules StatusRules,
 ) []domain.IssueActivityInterval {
 	// Parse issue creation time to avoid showing it on days before it existed
 	var issueCreatedAt time.Time
@@ -328,7 +331,7 @@ func buildIssueIntervals(
 		}
 	}
 
-	active := isSelfAssignee(state.assignee, me)
+	active := isSelfAssignee(state.assignee, me) && !isIgnoredStatus(state.status, rules)
 	cursor := dayStart
 	// Don't count time before the issue was created
 	if !issueCreatedAt.IsZero() && issueCreatedAt.After(cursor) {
@@ -337,7 +340,8 @@ func buildIssueIntervals(
 	intervals := make([]domain.IssueActivityInterval, 0)
 
 	// If no changelog and user is the reporter and issue was created today — add single interval
-	if len(events) == 0 && !active && isSelfReporter(issue, me) &&
+	// (status filters don't apply here: the user created the task regardless of its current status)
+	if len(events) == 0 && !isSelfAssignee(state.assignee, me) && isSelfReporter(issue, me) &&
 		!issueCreatedAt.IsZero() && !issueCreatedAt.Before(dayStart) && issueCreatedAt.Before(dayEnd) {
 		return []domain.IssueActivityInterval{{
 			IssueKey:    issue.Key,
@@ -379,10 +383,10 @@ func buildIssueIntervals(
 			state.assignee = event.Change.assigneeTo
 		}
 		cursor = event.At
-		active = isSelfAssignee(state.assignee, me)
+		active = isSelfAssignee(state.assignee, me) && !isIgnoredStatus(state.status, rules)
 	}
 
-	if active && dayEnd.After(cursor) {
+	if active && dayEnd.After(cursor) && (cursor.After(dayStart) || !isDayCloseStatus(state.status, rules)) {
 		intervals = append(intervals, domain.IssueActivityInterval{
 			IssueKey: issue.Key,
 			Summary:  issue.Fields.Summary,
@@ -429,6 +433,14 @@ func parseJiraTime(v string) (time.Time, error) {
 		}
 	}
 	return time.Time{}, fmt.Errorf("unsupported jira time format: %s", v)
+}
+
+func isIgnoredStatus(status string, rules StatusRules) bool {
+	return containsNormalized(rules.IgnoredStatuses, status)
+}
+
+func isDayCloseStatus(status string, rules StatusRules) bool {
+	return containsNormalized(rules.DayCloseStatuses, status)
 }
 
 func normalizeStatus(status string) string {
