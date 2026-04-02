@@ -386,7 +386,7 @@ func loadJiraAllocation(date time.Time, timezone string, remaining int, defaultI
 }
 
 func loadJiraStatusRulesFromEnv() jira.StatusRules {
-	rules := jira.DefaultStatusRules()
+	rules := jira.StatusRules{}
 	if v := strings.TrimSpace(os.Getenv("JIRA_IGNORED_STATUSES")); v != "" {
 		rules.IgnoredStatuses = splitCSV(v)
 	}

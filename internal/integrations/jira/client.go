@@ -196,8 +196,13 @@ func (c Client) fetchIssuesWithChangelog(ctx context.Context, fromDate, toDate t
 	// (upper bound excluded to capture tasks updated after range end)
 	fromTimeStr := fromDate.Format("2006-01-02") + " 00:00"
 	
-	// Format JQL with only lower date bound
-	jql := fmt.Sprintf(jqlTemplate, fromTimeStr)
+	// Count %s placeholders to pass the correct number of arguments
+	placeholderCount := strings.Count(jqlTemplate, "%s")
+	args := make([]any, placeholderCount)
+	for i := range args {
+		args[i] = fromTimeStr
+	}
+	jql := fmt.Sprintf(jqlTemplate, args...)
 
 	startAt := 0
 	const pageSize = 100
@@ -437,24 +442,6 @@ func expandEnvVars(template string) string {
 		varName := match[2 : len(match)-1]
 		return os.Getenv(varName)
 	})
-}
-
-func DefaultStatusRules() StatusRules {
-	return StatusRules{
-		IgnoredStatuses: []string{
-			"Новый",
-			"New",
-		},
-		DayCloseStatuses: []string{
-			"Закрыт",
-			"Closed",
-			"Отменен",
-			"Отменён",
-			"Включен в релиз",
-			"Включён в релиз",
-			"Отложено",
-		},
-	}
 }
 
 func isSelfAssignee(value string, me userInfo) bool {

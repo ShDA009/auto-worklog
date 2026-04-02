@@ -33,7 +33,7 @@
 
 | Переменная | Описание |
 |---|---|
-| DEFAULT_ISSUE | Default issue для неизвестных встреч (ODP-1000) |
+| DEFAULT_ISSUE | Default issue для неизвестных встреч (YOU_PROJECT-1000) |
 | EWS_URL | URL Exchange Web Services https://mail.example.com/EWS/Exchange.asmx|
 | EWS_USERNAME | Почта или логин |
 | EWS_PASSWORD | Пароль |
@@ -43,7 +43,7 @@
 | EWS_IGNORED_MEETINGS | занят,обед | Встречи для игнорирования |
 | JIRA_IGNORED_STATUSES | Новый | Статусы не для учёта |
 | JIRA_DAY_CLOSE_STATUSES | Закрыт,Closed,Отменен,Отменён,"Включен в релиз" | Статусы "день закрыт" |
-| JIRA_JQL_TEMPLATE | project = ODP AND status NOT IN ({JIRA_IGNORED_STATUSES}) AND issuetype NOT IN (Epic) AND ((assignee = currentUser() AND status NOT IN (\${JIRA_DAY_CLOSE_STATUSES})) OR (assignee WAS currentUser() AND updated >= "%s"))| Custom JQL (поддержка ${VAR} и %s) |
+| JIRA_JQL_TEMPLATE | project = YOU_PROJECT AND (status NOT IN (${JIRA_IGNORED_STATUSES}) AND issuetype NOT IN (Epic) AND ((assignee = currentUser() AND status NOT IN (${JIRA_DAY_CLOSE_STATUSES})) OR	(assignee WAS currentUser() AND updated >= "%s")) OR reporter = currentUser() AND updated >= "%s") | Custom JQL (поддержка ${VAR} и %s) |
 | WORK_TYPE | Руководство | Вид работ (атрибут Tempo: Руководство, Разработка, Аналитика, Тестирование) |
 | IS_MANAGER | false | Распределять неиспользованное время |
 | MANAGER_ACTIVITY_COMMENT | Координация и синхронизация задач | Comment для менеджерского времени |
