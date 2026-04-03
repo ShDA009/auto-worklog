@@ -255,6 +255,9 @@ func (c Client) httpClient() *http.Client {
 	return &http.Client{Timeout: 30 * time.Second}
 }
 
+// buildIssueIntervals строит список интервалов активности пользователя (me) по задаче за указанный день [dayStart, dayEnd].
+// Интервал = отрезок времени, в течение которого задача была назначена на me и не находилась в игнорируемом статусе.
+// Дополнительно: если me является автором задачи и создал её в этот день — добавляется интервал создания.
 func buildIssueIntervals(
 	issue jiraIssue,
 	me userInfo,
@@ -262,30 +265,59 @@ func buildIssueIntervals(
 	dayEnd time.Time,
 	rules StatusRules,
 ) []domain.IssueActivityInterval {
+	// --- Шаг 1: Определяем время создания задачи ---
+	// Если задача создана позже dayEnd — она ещё не существовала в этот день, пропускаем.
 	var createdAt time.Time
 	if issue.Fields.Created != "" {
 		if t, err := parseJiraTime(issue.Fields.Created); err == nil {
 			if !t.Before(dayEnd) {
-				return nil // issue didn't exist yet on this day
+				return nil // задача создана после конца дня — не учитываем
 			}
 			createdAt = t
 		}
 	}
 
+	// --- Шаг 2: Парсим историю изменений (changelog) ---
+	// events — список всех изменений статуса/исполнителя, отсортированных по времени.
 	events := parseChangelog(issue.Changelog.Histories)
+
+	// --- Шаг 3: Восстанавливаем состояние задачи на начало дня ---
+	// Берём текущее состояние (статус + исполнитель) и «откручиваем» изменения назад до dayStart.
+	// Результат: state — какой статус и исполнитель были у задачи в момент dayStart.
 	state := rewindStateToDay(issueState{issue.Fields.Status.Name, assigneeValue(issue)}, events, dayStart)
+
+	// --- Шаг 4: Собираем цепочку статусов за день ---
+	// statusChain — все статусы, через которые прошла задача в течение дня (для отображения).
 	statusChain := collectStatusChain(state.status, events, dayStart, dayEnd)
 
+	// --- Шаг 4.5: Пропускаем задачи, уже закрытые до начала дня ---
+	// Если на момент dayStart задача находится в «закрытом» статусе (dayCloseStatus)
+	// И была создана до этого дня — значит она закрыта вчера или раньше.
+	// Такая задача не должна попадать в отчёт за сегодня.
+	// Исключение: если задача создана сегодня — пропускать нельзя
+	// (state после rewind будет текущим, т.е. уже закрытым, хотя закрытие произошло сегодня).
+	if isDayCloseStatus(state.status, rules) && !createdAt.IsZero() && createdAt.Before(dayStart) {
+		return nil
+	}
+
+	// --- Шаг 5: Инициализируем курсор начала текущего интервала ---
+	// cursor — левая граница потенциального интервала активности.
+	// Если задача создана внутри дня — сдвигаем курсор к моменту создания
+	// (до создания задачи активности быть не могло).
 	cursor := dayStart
 	if !createdAt.IsZero() && createdAt.After(cursor) {
 		cursor = createdAt
 	}
 
+	// --- Шаг 6: Проверяем, активна ли задача в начале дня ---
+	// active = true, если в момент dayStart задача назначена на me и статус не игнорируемый.
 	active := isSelfAssignee(state.assignee, me) && !isIgnoredStatus(state.status, rules)
 	intervals := make([]domain.IssueActivityInterval, 0)
 
-	// Creation activity: always logged for the reporter on the day the issue was created,
-	// regardless of other changes on that day (by other assignees etc.)
+	// --- Шаг 7: Интервал создания (особый случай) ---
+	// Если me является репортером И задача создана именно в этот день —
+	// добавляем специальный интервал создания. Он не зависит от статуса и исполнителя:
+	// сам факт создания задачи — это активность.
 	if !createdAt.IsZero() && !createdAt.Before(dayStart) && isSelfReporter(issue, me) {
 		iv := newInterval(issue, state.status, "", "", createdAt, dayEnd)
 		iv.StatusChain = statusChain
@@ -293,34 +325,51 @@ func buildIssueIntervals(
 		intervals = append(intervals, iv)
 	}
 
+	// --- Шаг 8: Обходим события изменений за день ---
+	// Каждое событие — момент, когда изменился статус или исполнитель.
+	// Логика: если до наступления события задача была «активна» (назначена на me, не игнор-статус),
+	// то отрезок [cursor, e.At] фиксируем как интервал активности.
 	for _, e := range events {
 		if e.At.Before(dayStart) {
-			continue
+			continue // событие до начала дня — пропускаем
 		}
 		if e.At.After(dayEnd) {
-			break
+			break // события строго отсортированы; всё после dayEnd — уже не наш день
 		}
+
+		// Если задача была активна с cursor до e.At — фиксируем интервал.
 		if active && e.At.After(cursor) {
 			transferredTo := ""
+			// Если следующее событие — переназначение на другого — сохраняем, кому передали.
 			if e.Change.assigneeTo != "" && !isSelfAssignee(e.Change.assigneeTo, me) {
 				transferredTo = e.Change.assigneeTo
 			}
 			intervals = append(intervals, newInterval(issue, state.status, e.Change.statusTo, transferredTo, cursor, e.At))
 		}
+
+		// Применяем изменения из события к текущему state.
 		if e.Change.statusTo != "" {
 			state.status = e.Change.statusTo
 		}
 		if e.Change.assigneeTo != "" {
 			state.assignee = e.Change.assigneeTo
 		}
+
+		// Сдвигаем курсор и пересчитываем active для следующего отрезка.
 		cursor = e.At
 		active = isSelfAssignee(state.assignee, me) && !isIgnoredStatus(state.status, rules)
 	}
 
+	// --- Шаг 9: Закрываем последний интервал до конца дня ---
+	// Если после последнего события (или с начала, если событий не было) задача остаётся активной —
+	// фиксируем отрезок [cursor, dayEnd].
+	// Исключение: cursor == dayStart && статус «закрывающий» — тогда задача уже закрыта весь день, не учитываем.
 	if active && dayEnd.After(cursor) && (cursor.After(dayStart) || !isDayCloseStatus(state.status, rules)) {
 		intervals = append(intervals, newInterval(issue, state.status, "", "", cursor, dayEnd))
 	}
 
+	// --- Шаг 10: Прикрепляем цепочку статусов к первому интервалу ---
+	// StatusChain нужен только один раз — на первом интервале задачи.
 	if len(intervals) > 0 {
 		intervals[0].StatusChain = statusChain
 	}
